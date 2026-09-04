@@ -161,18 +161,18 @@ CURRENCY_LABELS = {
 
 DEFAULT_SETTINGS = {
     "period": "weekly",
-    "currency": "TRY",
-    "lookback": 3,
+    "currency": "USD",
+    "lookback": 2,
     "max_workers": 20,
     "use_cache": True,
-    "sideways_enabled": False,
-    "sideways_method": "range",
-    "sideways_months_list": [3, 6, 12],
+    "sideways_enabled": True,
+    "sideways_method": "atr",
+    "sideways_months_list": [12, 18, 24],
     "sideways_min_windows": None,
     "sideways_range_pct": 15.0,
     "sideways_atr_pct": 5.0,
-    "drawdown_enabled": False,
-    "drawdown_min_pct": 60.0,
+    "drawdown_enabled": True,
+    "drawdown_min_pct": 50.0,
     "son_semboller_text": "",
     "alt_scan_period": "monthly",
     "alt_scan_min_chain": 3,
@@ -284,7 +284,7 @@ def enrich_actual_ath_drawdown(row, min_pct=60.0):
 
 def vwap_filter_passes(row, cfg):
     """VWAP zincir mantığını değiştirmeden, kullanıcı seçtiyse sonuç sonrasında filtre uygular."""
-    row = enrich_actual_ath_drawdown(row or {}, cfg.get("drawdown_min_pct", 60.0))
+    row = enrich_actual_ath_drawdown(row or {}, cfg.get("drawdown_min_pct", 50.0))
     if bool(cfg.get("sideways_enabled", False)):
         sw = row.get("sideways") or {}
         if not bool(sw.get("is_sideways", False)):
@@ -347,6 +347,20 @@ def build_combined_analysis(sets):
         })
 
     signal_scores = {}
+
+    # İlk sistemde Yataylık ve ATH'den Düşüş VWAP'tan bağımsız ek listelerdi.
+    # Birleşik tabloda VWAP eşleşmesi olmasa bile bu sembolleri koru.
+    for r in list(sets.get("Yataylık") or []):
+        x = rec(r.get("symbol"))
+        cnt = r.get("sideways_count", 0); tot = r.get("total_windows", 0)
+        months = ",".join(str(m) for m in (r.get("sideways_months") or []))
+        x["Yataylık"] = f"✅ Yatay · {cnt}/{tot}" + (f" · {months} ay" if months else "")
+
+    for r in list(sets.get("ATH'den Düşüş") or []):
+        x = rec(r.get("symbol"))
+        val = r.get("drawdown_pct")
+        x["ATH'den Düşüş %"] = (round(float(val), 1) if val is not None else "—")
+
     for r in list(sets.get("VWAP") or []):
         x = rec(r.get("symbol"))
         x["VWAP"] = f"{r.get('level', '—')}. VWAP"
@@ -806,7 +820,7 @@ def render_results_page():
         col.metric(name, len(rows), delta=f"{sum(q_score(r) >= 70 for r in rows)} adet 70+")
 
     focus = st.session_state.get("_results_focus", "Özet")
-    choices = ["Özet", "Birleşik Analiz"] + names
+    choices = ["Özet", "Birleşik Analiz"] + names + ["Yataylık", "ATH'den Düşüş"]
     index = choices.index(focus) if focus in choices else 0
     view = st.selectbox("Hangi sonucu görmek istiyorsun?", choices, index=index, key="results_view_select")
     st.session_state["_results_focus"] = view
@@ -911,6 +925,39 @@ def render_results_page():
     items = list(sets.get(view) or [])
     m = meta.get(view) or {}
     errors = list(m.get("errors") or [])
+
+    if view in {"Yataylık", "ATH'den Düşüş"}:
+        st.caption(
+            f"Periyot: **{m.get('period') or 'Günlük yardımcı hesap'}** · Taranan: **{m.get('total') or '—'}** · "
+            f"Tarama: **{m.get('scan_time') or '—'}**"
+        )
+        if not items:
+            st.warning("Bu yardımcı filtre için eşleşme bulunamadı.")
+            return
+        if view == "Yataylık":
+            rows = [{
+                "Sembol": r.get("symbol", "—"),
+                "Yatay": "✅ Evet",
+                "Sağlanan Vade": f"{r.get('sideways_count', 0)}/{r.get('total_windows', 0)}",
+                "Yatay Aylar": ", ".join(str(x) for x in (r.get("sideways_months") or [])) or "—",
+                "Anchor": r.get("anchor_reason") or "—",
+                "Anchor Tarihi": r.get("anchor_date") or "—",
+            } for r in items]
+        else:
+            rows = [{
+                "Sembol": r.get("symbol", "—"),
+                "ATH/Anchor'dan Düşüş %": r.get("drawdown_pct", "—"),
+                "Anchor": r.get("anchor_reason") or "—",
+                "Anchor Tarihi": r.get("anchor_date") or "—",
+            } for r in sorted(items, key=lambda z: float(z.get("drawdown_pct") or 0), reverse=True)]
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=min(680, 80 + 35 * len(rows)))
+        st.download_button(
+            "⬇️ Sonuçları CSV indir",
+            pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig"),
+            file_name=("yataylik_sonuclari.csv" if view == "Yataylık" else "ath_dusus_sonuclari.csv"),
+            mime="text/csv", width="stretch",
+        )
+        return
 
     # VWAP'ın HAM eşleşmeleri daima korunur. Yataylık / ATH filtresi sadece
     # sonuç görünümünde isteğe bağlı süzme yapar; tarama sonucunu silmez.
@@ -1059,19 +1106,19 @@ def run_vwap_scan(symbols, cfg, progress=None, start=0.0, span=1.0, source="VWAP
         progress_callback=callback,
         errors_out=errors,
         sideways_enabled=bool(cfg.get("sideways_enabled", False)),
-        sideways_months_list=list(cfg.get("sideways_months_list") or [3, 6, 12]),
+        sideways_months_list=list(cfg.get("sideways_months_list") or [12, 18, 24]),
         sideways_range_pct=float(cfg.get("sideways_range_pct", 15.0)),
         sideways_atr_pct=float(cfg.get("sideways_atr_pct", 5.0)),
-        sideways_method=str(cfg.get("sideways_method", "range")),
+        sideways_method=str(cfg.get("sideways_method", "atr")),
         sideways_min_windows=cfg.get("sideways_min_windows"),
         drawdown_enabled=bool(cfg.get("drawdown_enabled", False)),
-        drawdown_min_pct=float(cfg.get("drawdown_min_pct", 60.0)),
+        drawdown_min_pct=float(cfg.get("drawdown_min_pct", 50.0)),
         alternation_enabled=False,
         trendline_enabled=False,
         triangle_enabled=False,
         currency=str(cfg.get("currency", "TRY")),
     )
-    results = [enrich_actual_ath_drawdown(r, cfg.get("drawdown_min_pct", 60.0)) for r in results]
+    results = [enrich_actual_ath_drawdown(r, cfg.get("drawdown_min_pct", 50.0)) for r in results]
     raw_count = len(results)
     results = [r for r in results if vwap_filter_passes(r, cfg)]
     store_result_set(
@@ -1081,12 +1128,12 @@ def run_vwap_scan(symbols, cfg, progress=None, start=0.0, span=1.0, source="VWAP
             "before_filter_count": raw_count,
             "filters": {
                 "sideways_enabled": bool(cfg.get("sideways_enabled", False)),
-                "sideways_months": list(cfg.get("sideways_months_list") or [3, 6, 12]),
-                "sideways_method": str(cfg.get("sideways_method", "range")),
+                "sideways_months": list(cfg.get("sideways_months_list") or [12, 18, 24]),
+                "sideways_method": str(cfg.get("sideways_method", "atr")),
                 "sideways_range_pct": float(cfg.get("sideways_range_pct", 15.0)),
                 "sideways_atr_pct": float(cfg.get("sideways_atr_pct", 5.0)),
                 "drawdown_enabled": bool(cfg.get("drawdown_enabled", False)),
-                "drawdown_min_pct": float(cfg.get("drawdown_min_pct", 60.0)),
+                "drawdown_min_pct": float(cfg.get("drawdown_min_pct", 50.0)),
             },
         },
     )
@@ -1286,19 +1333,19 @@ def render_scan_page():
             st.caption("Bu bölümü değiştirmek zorunda değilsiniz. Varsayılan ayarlar günlük kullanım için yeterlidir.")
             sideways_enabled = st.checkbox("Yataylık filtresini uygula", value=bool(cfg.get("sideways_enabled", False)), key="vwap_sideways")
             sideways_method = cfg.get("sideways_method", "range")
-            sideways_months = list(cfg.get("sideways_months_list") or [3, 6, 12])
+            sideways_months = list(cfg.get("sideways_months_list") or [12, 18, 24])
             sideways_range = float(cfg.get("sideways_range_pct", 15.0))
             sideways_atr = float(cfg.get("sideways_atr_pct", 5.0))
             if sideways_enabled:
                 a1, a2 = st.columns(2)
                 with a1:
-                    sideways_method = st.selectbox("Yataylık yöntemi", ["range", "atr"], index=0 if sideways_method == "range" else 1, format_func=lambda x: "Fiyat Aralığı" if x == "range" else "ATR", key="vwap_sideways_method")
+                    sideways_method = st.selectbox("Yataylık yöntemi", ["atr", "range", "both"], index=0 if sideways_method == "atr" else (1 if sideways_method == "range" else 2), format_func=lambda x: {"atr":"ATR", "range":"Fiyat Aralığı", "both":"ATR + Fiyat Aralığı"}[x], key="vwap_sideways_method")
                     sideways_months = st.multiselect("Vadeler (ay)", [3, 6, 12, 18, 24], default=sideways_months, key="vwap_sideways_months")
                 with a2:
                     sideways_range = st.slider("Maks. fiyat aralığı %", 5.0, 50.0, sideways_range, 1.0, key="vwap_sideways_range")
                     sideways_atr = st.slider("Maks. ATR %", 1.0, 15.0, sideways_atr, .5, key="vwap_sideways_atr")
             drawdown_enabled = st.checkbox("ATH’den düşüş filtresini uygula", value=bool(cfg.get("drawdown_enabled", False)), key="vwap_drawdown")
-            drawdown_min = float(cfg.get("drawdown_min_pct", 60.0))
+            drawdown_min = float(cfg.get("drawdown_min_pct", 50.0))
             if drawdown_enabled:
                 drawdown_min = st.slider("En az ATH’den düşüş %", 10.0, 90.0, drawdown_min, 5.0, key="vwap_drawdown_min")
             if sideways_enabled or drawdown_enabled:

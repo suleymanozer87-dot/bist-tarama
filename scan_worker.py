@@ -172,7 +172,7 @@ def _filter_vwap_rows(rows, cfg):
     düşüş seçenekleri sonuç ekranında ayrı bir görünüm filtresi olarak kullanılır.
     """
     out = []
-    min_pct = float(cfg.get("drawdown_min_pct", 60.0))
+    min_pct = float(cfg.get("drawdown_min_pct", 50.0))
     sw_enabled = bool(cfg.get("sideways_enabled", False))
     dd_enabled = bool(cfg.get("drawdown_enabled", False))
     for row in list(rows or []):
@@ -188,7 +188,7 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
     max_workers = int(cfg.get("max_workers", 20))
     use_cache = bool(cfg.get("use_cache", True))
     if phase == "VWAP":
-        results, _, _, _, _, _ = scan_symbols_parallel(
+        results, sideways_rows, drawdown_rows, _, _, _ = scan_symbols_parallel(
             symbols,
             cfg.get("period", "weekly"),
             lookback=int(cfg.get("lookback", 3)),
@@ -197,20 +197,24 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
             progress_callback=progress_cb,
             errors_out=errors,
             sideways_enabled=bool(cfg.get("sideways_enabled", False)),
-            sideways_months_list=list(cfg.get("sideways_months_list") or [3, 6, 12]),
+            sideways_months_list=list(cfg.get("sideways_months_list") or [12, 18, 24]),
             sideways_range_pct=float(cfg.get("sideways_range_pct", 15.0)),
             sideways_atr_pct=float(cfg.get("sideways_atr_pct", 5.0)),
-            sideways_method=str(cfg.get("sideways_method", "range")),
+            sideways_method=str(cfg.get("sideways_method", "atr")),
             sideways_min_windows=cfg.get("sideways_min_windows"),
             drawdown_enabled=bool(cfg.get("drawdown_enabled", False)),
-            drawdown_min_pct=float(cfg.get("drawdown_min_pct", 60.0)),
+            drawdown_min_pct=float(cfg.get("drawdown_min_pct", 50.0)),
             alternation_enabled=False,
             trendline_enabled=False,
             triangle_enabled=False,
             currency=str(cfg.get("currency", "TRY")),
         )
         filtered = _filter_vwap_rows(results, cfg)
-        return {"rows": filtered, "raw_count": len(results)}
+        return {
+            "rows": filtered, "raw_count": len(results),
+            "sideways_rows": list(sideways_rows or []),
+            "drawdown_rows": list(drawdown_rows or []),
+        }
 
     if phase == "Üçgen":
         return {"rows": scan_triangle_symbols_parallel(
@@ -328,6 +332,26 @@ def run(job_id):
             scan_out = _scan_chunk(phase, chunk, cfg, progress_cb, chunk_errors)
             new_rows = list((scan_out or {}).get("rows") or [])
             raw_chunk_count = (scan_out or {}).get("raw_count")
+            if phase == "VWAP":
+                sw_new = list((scan_out or {}).get("sideways_rows") or [])
+                dd_new = list((scan_out or {}).get("drawdown_rows") or [])
+                if bool(cfg.get("sideways_enabled", False)):
+                    payload["result_sets"]["Yataylık"] = _merge_rows(list(payload["result_sets"].get("Yataylık") or []), sw_new)
+                    payload["result_meta"]["Yataylık"] = {
+                        "total": len(symbols), "period": "Günlük yardımcı hesap", "errors": all_errors,
+                        "source": "VWAP · Yataylık", "scan_time": now_text(), "checkpoint": end,
+                        "filters": {"months": list(cfg.get("sideways_months_list") or [12,18,24]),
+                                    "method": str(cfg.get("sideways_method", "atr")),
+                                    "atr_pct": float(cfg.get("sideways_atr_pct", 5.0)),
+                                    "range_pct": float(cfg.get("sideways_range_pct", 15.0))},
+                    }
+                if bool(cfg.get("drawdown_enabled", False)):
+                    payload["result_sets"]["ATH'den Düşüş"] = _merge_rows(list(payload["result_sets"].get("ATH'den Düşüş") or []), dd_new)
+                    payload["result_meta"]["ATH'den Düşüş"] = {
+                        "total": len(symbols), "period": _period_label("VWAP", cfg), "errors": all_errors,
+                        "source": "VWAP · ATH/Anchor'dan Düşüş", "scan_time": now_text(), "checkpoint": end,
+                        "filters": {"min_pct": float(cfg.get("drawdown_min_pct", 50.0))},
+                    }
             if phase == "VWAP" and raw_chunk_count is not None:
                 raw_match_count += int(raw_chunk_count or 0)
             existing_rows = _merge_rows(existing_rows, new_rows)
@@ -345,12 +369,12 @@ def run(job_id):
                 "filter_pass_count": (sum(1 for r in existing_rows if bool((r or {}).get("filter_pass", True))) if phase == "VWAP" else None),
                 "filters": ({
                     "sideways_enabled": bool(cfg.get("sideways_enabled", False)),
-                    "sideways_months": list(cfg.get("sideways_months_list") or [3, 6, 12]),
-                    "sideways_method": str(cfg.get("sideways_method", "range")),
+                    "sideways_months": list(cfg.get("sideways_months_list") or [12, 18, 24]),
+                    "sideways_method": str(cfg.get("sideways_method", "atr")),
                     "sideways_range_pct": float(cfg.get("sideways_range_pct", 15.0)),
                     "sideways_atr_pct": float(cfg.get("sideways_atr_pct", 5.0)),
                     "drawdown_enabled": bool(cfg.get("drawdown_enabled", False)),
-                    "drawdown_min_pct": float(cfg.get("drawdown_min_pct", 60.0)),
+                    "drawdown_min_pct": float(cfg.get("drawdown_min_pct", 50.0)),
                 } if phase == "VWAP" else {}),
             }
             # Önce sonucu kaydet, sonra cursor'u ilerlet. Çökme anında aynı blok
