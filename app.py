@@ -68,81 +68,64 @@ st.markdown(
     """
 <style>
 :root { color-scheme: light; }
-[data-testid="stAppViewContainer"] { background: #f4f7fb; color: #172033; }
-[data-testid="stHeader"] { display:none !important; }
-[data-testid="stToolbar"] { display:none !important; }
-[data-testid="stDecoration"] { display:none !important; }
-.block-container { max-width: 1450px; padding-top: 1.25rem; padding-bottom: 2.5rem; }
-
-h1, h2, h3 { color: #172033; letter-spacing: -.02em; }
-.small-muted { color:#64748b; font-size:.90rem; }
+[data-testid="stAppViewContainer"] { background: #f2f2f7; color: #111827; }
+[data-testid="stHeader"], [data-testid="stToolbar"], [data-testid="stDecoration"] { display:none !important; }
+.block-container { max-width: 980px; padding-top: 1rem; padding-bottom: 1.5rem; }
+h1, h2, h3 { color:#111827; letter-spacing:-.02em; margin-bottom:.35rem; }
+p, .small-muted, [data-testid="stCaptionContainer"] { color:#6b7280; }
 .hero {
-    background: linear-gradient(135deg,#ffffff 0%,#f0fdfa 100%);
-    border:1px solid #dbe6ee; border-radius:18px; padding:18px 20px;
-    margin-bottom:12px; box-shadow:0 2px 8px rgba(15,23,42,.04);
+    background:#ffffff; border:1px solid #e5e7eb; border-radius:22px; padding:18px;
+    box-shadow:0 10px 28px rgba(17,24,39,.05); margin-bottom:14px;
 }
-.scan-card {
-    background:#fff; border:1px solid #dbe6ee; border-radius:16px;
-    padding:14px 16px; min-height:122px; box-shadow:0 1px 4px rgba(15,23,42,.035);
+.scan-card, .result-card, [data-testid="stMetric"], [data-testid="stExpander"] {
+    background:#ffffff; border:1px solid #e5e7eb !important; border-radius:20px !important;
+    box-shadow:0 6px 20px rgba(17,24,39,.04);
 }
-.result-card {
-    background:#fff; border:1px solid #dbe6ee; border-radius:14px;
-    padding:10px 12px; margin-bottom:8px;
-}
-[data-testid="stMetric"] {
-    background:#fff; border:1px solid #dbe6ee; border-radius:14px;
-    padding:.65rem .78rem; box-shadow:0 1px 4px rgba(15,23,42,.035);
-}
-[data-testid="stExpander"] {
-    background:#fff; border:1px solid #dbe6ee !important; border-radius:14px !important;
-}
+.scan-card { padding:14px 16px; min-height:88px; }
+.result-card { padding:10px 12px; margin-bottom:8px; }
+[data-testid="stMetric"] { padding:.7rem .85rem; }
 .stButton > button, .stDownloadButton > button {
-    border-radius:11px; min-height:2.7rem; font-weight:650;
+    border-radius:16px; min-height:2.8rem; font-weight:700; border:1px solid #d1d5db;
 }
-button[kind="primary"] { box-shadow:0 2px 7px rgba(15,118,110,.18); }
-[data-testid="stDataFrame"] { background:#fff; border-radius:12px; overflow:hidden; }
-hr { border-color:#dbe6ee !important; }
-
-/* Üst navigasyon: Streamlit üst çubuğundan bağımsız, görünür bir menü alanı. */
+button[kind="primary"] {
+    background:#0a84ff !important; border-color:#0a84ff !important; color:white !important;
+    box-shadow:0 8px 18px rgba(10,132,255,.18);
+}
+button[kind="secondary"] {
+    background:#ffffff !important; color:#111827 !important;
+}
+[data-testid="stDataFrame"] { background:#ffffff; border:1px solid #e5e7eb; border-radius:20px; overflow:hidden; }
 .nav-shell {
-    background:#ffffff; border:1px solid #dbe6ee; border-radius:16px;
-    padding:10px 12px 4px 12px; margin:0 0 14px 0;
-    box-shadow:0 2px 10px rgba(15,23,42,.06);
+    background:#ffffff; border:1px solid #e5e7eb; border-radius:20px; padding:10px; margin:0 0 12px 0;
+    box-shadow:0 8px 22px rgba(17,24,39,.04);
 }
-.nav-label {
-    color:#64748b; font-size:.76rem; font-weight:800; letter-spacing:.08em;
-    text-transform:uppercase; margin:0 0 6px 2px;
+.nav-label { color:#9ca3af; font-size:.72rem; font-weight:800; letter-spacing:.08em; text-transform:uppercase; margin:0 0 6px 4px; }
+.nav-spacer { height:2px; }
+.compact-status {
+    background:#ffffff; border:1px solid #e5e7eb; border-radius:18px; padding:12px 14px; margin-bottom:12px;
+    box-shadow:0 6px 20px rgba(17,24,39,.04);
 }
-.nav-spacer { height:4px; }
-[data-testid="stPlotlyChart"] { width:100% !important; max-width:100% !important; overflow:hidden !important; }
-[data-testid="stPlotlyChart"] > div { width:100% !important; max-width:100% !important; }
+.compact-status strong { color:#111827; }
+hr { border-color:#e5e7eb !important; }
+
+/* Segmented controls */
+div[role="radiogroup"] { gap:.35rem !important; }
+div[role="radiogroup"] label {
+    background:#ffffff !important; border:1px solid #d1d5db !important; border-radius:999px !important;
+    padding:.25rem .8rem !important; min-height:2.2rem !important;
+}
+div[role="radiogroup"] label:has(input:checked) {
+    background:#e8f1ff !important; border-color:#0a84ff !important;
+}
 
 @media (max-width: 760px) {
-    .block-container { padding-left:.45rem; padding-right:.45rem; padding-top:.75rem; }
-    h1 { font-size:1.45rem !important; }
-    h2 { font-size:1.25rem !important; }
-    h3 { font-size:1.08rem !important; }
+    .block-container { padding-left:.45rem; padding-right:.45rem; padding-top:.65rem; }
     [data-testid="stHorizontalBlock"] { flex-wrap:wrap !important; gap:.35rem !important; }
     [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
         min-width:100% !important; width:100% !important; flex:1 1 100% !important;
     }
-    [data-testid="stMetricValue"] { font-size:1.15rem !important; }
-    .hero { padding:13px 13px; border-radius:14px; }
-    .scan-card { min-height:auto; }
-    .nav-shell { padding:9px 9px 3px 9px; margin-bottom:10px; }
-    .nav-label { font-size:.70rem; margin-bottom:4px; }
-    .stButton > button, .stDownloadButton > button { width:100% !important; min-height:2.9rem !important; }
-    [data-testid="stPlotlyChart"] { min-height:640px !important; touch-action:none !important; overscroll-behavior:contain !important; -webkit-user-select:none !important; user-select:none !important; }
-    [data-testid="stPlotlyChart"] .js-plotly-plot,
-    [data-testid="stPlotlyChart"] .plot-container,
-    [data-testid="stPlotlyChart"] .svg-container { touch-action:none !important; overscroll-behavior:contain !important; }
-    [data-testid="stPlotlyChart"] .modebar { opacity:1 !important; }
-    [data-testid="stPlotlyChart"] .modebar-btn { min-width:38px !important; min-height:38px !important; padding:8px !important; }
-    div[role="radiogroup"] { gap:.25rem !important; flex-wrap:wrap !important; }
-}
-@media (max-width: 430px) {
-    .block-container { padding-left:.30rem; padding-right:.30rem; }
-    [data-testid="stPlotlyChart"] { min-height:610px !important; }
+    .hero, .nav-shell, .scan-card, .result-card, [data-testid="stMetric"], [data-testid="stExpander"] { border-radius:18px !important; }
+    .stButton > button, .stDownloadButton > button { width:100% !important; min-height:2.95rem !important; }
 }
 </style>
 """,
@@ -322,48 +305,61 @@ def format_drawdown_value(row):
 
 
 def build_combined_analysis(sets):
-    """Tüm tarama sonuçlarını sembol bazında tek satırda birleştirir."""
+    """Tüm tarama sonuçlarını sembol bazında tek karar kaydında birleştirir."""
     by_sym = {}
+    signal_scores = {}
 
     def rec(sym):
         sym = str(sym or "—").replace(".IS", "").upper()
         return by_sym.setdefault(sym, {
             "Sembol": sym,
+            "Sinyal Sayısı": 0,
+            "Teyitler": "—",
             "VWAP": "—",
+            "VWAP Kırılım": "—",
+            "VWAP Bar Önce": "—",
             "ATH'den Düşüş %": "—",
             "Yataylık": "—",
             "Üçgen": "—",
+            "Üçgen Sıkışma %": "—",
             "Düşen Kırılım": "—",
+            "Trend Temas": "—",
             "Alternasyon": "—",
             "Alternasyon Desen Puanı": "—",
             "VWAP Puan": "—",
             "Üçgen Puan": "—",
             "Trend Puan": "—",
             "Alternasyon Puan": "—",
+            "Ortalama Puan": 0.0,
             "En Yüksek Puan": 0.0,
             "En Güçlü Sinyal": "—",
+            "RSI 14": "—",
+            "Dirence Alan %": "—",
+            "Hacim Oranı": "—",
+            "Retest": "—",
+            "Güçlü Teyitler": "—",
+            "Kalite": "—",
             "_chart_view": None,
             "_chart_result": None,
         })
 
-    signal_scores = {}
-
-    # İlk sistemde Yataylık ve ATH'den Düşüş VWAP'tan bağımsız ek listelerdi.
-    # Birleşik tabloda VWAP eşleşmesi olmasa bile bu sembolleri koru.
+    # Bağımsız yardımcı sonuçlar — VWAP eşleşmesi olmasa da korunur.
     for r in list(sets.get("Yataylık") or []):
         x = rec(r.get("symbol"))
         cnt = r.get("sideways_count", 0); tot = r.get("total_windows", 0)
         months = ",".join(str(m) for m in (r.get("sideways_months") or []))
-        x["Yataylık"] = f"✅ Yatay · {cnt}/{tot}" + (f" · {months} ay" if months else "")
+        x["Yataylık"] = f"✅ {cnt}/{tot}" + (f" · {months} ay" if months else "")
 
     for r in list(sets.get("ATH'den Düşüş") or []):
         x = rec(r.get("symbol"))
         val = r.get("drawdown_pct")
-        x["ATH'den Düşüş %"] = (round(float(val), 1) if val is not None else "—")
+        x["ATH'den Düşüş %"] = round(float(val), 1) if val is not None else "—"
 
     for r in list(sets.get("VWAP") or []):
         x = rec(r.get("symbol"))
         x["VWAP"] = f"{r.get('level', '—')}. VWAP"
+        x["VWAP Kırılım"] = r.get("cross_date", "—")
+        x["VWAP Bar Önce"] = r.get("bars_ago", "—")
         x["ATH'den Düşüş %"] = format_drawdown_value(r)
         x["Yataylık"] = format_sideways_status(r)
         score = round(q_score(r), 1)
@@ -373,6 +369,7 @@ def build_combined_analysis(sets):
     for r in list(sets.get("Üçgen") or []):
         x = rec(r.get("symbol"))
         x["Üçgen"] = str(r.get("pattern_type") or "Evet")
+        x["Üçgen Sıkışma %"] = r.get("squeeze_pct", "—")
         score = round(q_score(r), 1)
         x["Üçgen Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "Üçgen", "Üçgen", r))
@@ -380,7 +377,8 @@ def build_combined_analysis(sets):
     for r in list(sets.get("Düşen Trend") or []):
         x = rec(r.get("symbol"))
         date = r.get("cross_date")
-        x["Düşen Kırılım"] = f"✅ Evet{f' · {date}' if date else ''}"
+        x["Düşen Kırılım"] = f"✅{f' · {date}' if date else ''}"
+        x["Trend Temas"] = r.get("touches", "—")
         score = round(q_score(r), 1)
         x["Trend Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "Düşen Trend", "Düşen Trend", r))
@@ -388,7 +386,7 @@ def build_combined_analysis(sets):
     for r in list(sets.get("Alternasyon") or []):
         x = rec(r.get("symbol"))
         chain = r.get("chain_length")
-        x["Alternasyon"] = f"✅ Evet{f' · {chain} mum' if chain else ''}"
+        x["Alternasyon"] = f"✅{f' · {chain} mum' if chain else ''}"
         x["Alternasyon Desen Puanı"] = r.get("score", "—")
         score = round(q_score(r), 1)
         x["Alternasyon Puan"] = score
@@ -396,15 +394,31 @@ def build_combined_analysis(sets):
 
     for sym, x in by_sym.items():
         choices = signal_scores.get(sym) or []
-        if choices:
-            best = max(choices, key=lambda z: z[0])
-            x["En Yüksek Puan"] = best[0]
-            x["En Güçlü Sinyal"] = best[1]
-            x["_chart_view"] = best[2]
-            x["_chart_result"] = best[3]
+        if not choices:
+            continue
+        choices = sorted(choices, key=lambda z: z[0], reverse=True)
+        x["Sinyal Sayısı"] = len(choices)
+        x["Teyitler"] = " + ".join(c[1] for c in choices)
+        x["Ortalama Puan"] = round(sum(c[0] for c in choices) / len(choices), 1)
+        best = choices[0]
+        x["En Yüksek Puan"] = best[0]
+        x["En Güçlü Sinyal"] = best[1]
+        x["_chart_view"] = best[2]
+        x["_chart_result"] = best[3]
+        q = (best[3] or {}).get("quality") or {}
+        x["RSI 14"] = q.get("rsi14") if q.get("rsi14") is not None else "—"
+        x["Dirence Alan %"] = q.get("resistance_room_pct") if q.get("resistance_room_pct") is not None else "—"
+        x["Hacim Oranı"] = q.get("volume_ratio") if q.get("volume_ratio") is not None else "—"
+        x["Retest"] = "✅" if q.get("retest_confirmed") else "—"
+        x["Güçlü Teyitler"] = " · ".join((q.get("reasons") or [])[:3]) or "—"
+        x["Kalite"] = q.get("grade") or q_grade(best[3])
 
-    return sorted(by_sym.values(), key=lambda x: float(x.get("En Yüksek Puan") or 0), reverse=True)
-
+    # Önce çoklu teyit, sonra güçlü puan.
+    return sorted(
+        by_sym.values(),
+        key=lambda x: (int(x.get("Sinyal Sayısı") or 0), float(x.get("En Yüksek Puan") or 0), float(x.get("Ortalama Puan") or 0)),
+        reverse=True,
+    )
 
 def normalize_error_entry(item):
     """Eski/yeni worker hata biçimlerini güvenle (sembol, mesaj) çiftine çevirir."""
@@ -546,7 +560,7 @@ def launch_background_scan(kind, symbols, cfg, result_focus=None):
     _attach_job(job_id)
     st.session_state["_synced_job_revision"] = -1
     st.session_state["_app_page"] = "Sonuçlar"
-    st.session_state["_results_focus"] = result_focus or ("Özet" if kind == "Tümünü Tara" else kind)
+    st.session_state["_results_focus"] = result_focus or ("Karar Tablosu" if kind == "Tümünü Tara" else kind)
     if not started:
         st.session_state["_job_start_notice"] = "Sunucuda zaten devam eden bir tarama vardı; ona yeniden bağlandım."
     st.rerun()
@@ -563,9 +577,11 @@ def render_live_scan_status():
     detail = snap.get("detail") or ""
 
     if status in {"queued", "running"}:
-        st.info(f"🛰️ **{kind} ayrı worker prosesinde devam ediyor.** Telefon ekranı kapansa bile tarama Streamlit oturumuna bağlı değildir; geri geldiğinde kayıtlı işe yeniden bağlanır.")
-        st.progress(max(0.0, min(1.0, progress)), text=detail or f"{kind} sürüyor...")
-        st.caption(f"İş no: {snap.get('id')} · Başlangıç: {snap.get('started_at') or 'hazırlanıyor'}")
+        st.markdown(
+            f"<div class='compact-status'><strong>{kind}</strong> çalışıyor · %{progress*100:.0f}<br><span class='small-muted'>{detail or 'Tarama sürüyor'}</span></div>",
+            unsafe_allow_html=True,
+        )
+        st.progress(max(0.0, min(1.0, progress)))
         return
 
     revision = int(snap.get("revision") or 0)
@@ -573,15 +589,13 @@ def render_live_scan_status():
     if st.session_state.get("_job_terminal_seen") != seen_key:
         _sync_job_results(snap)
         st.session_state["_job_terminal_seen"] = seen_key
-        # Tam sayfayı bir kez yenileyerek sonuç tablolarının da yeni veriyi
-        # hemen görmesini sağla. Sonraki fragment turlarında tekrar etmez.
         st.rerun()
 
     if status == "completed":
         total_found = sum(len(v or []) for v in (snap.get("result_sets") or {}).values())
-        st.success(f"✅ **{kind} tamamlandı.** Toplam {total_found} eşleşme bulundu. Sonuçlar aşağıda.")
+        st.success(f"{kind} tamamlandı · {total_found} sonuç")
     elif status == "failed":
-        st.error(f"❌ **{kind} taraması durdu:** {snap.get('error') or 'Bilinmeyen hata'}")
+        st.error(f"{kind} durdu · {snap.get('error') or 'Bilinmeyen hata'}")
 
 
 # -----------------------------------------------------------------------------
@@ -697,7 +711,7 @@ def render_chart_page_if_requested():
     if not view:
         return False
 
-    if st.button("← Sonuçlar", type="secondary", width="content"):
+    if st.button("← Geri", type="secondary", width="content"):
         st.session_state.pop("_chart_page", None)
         st.session_state["_app_page"] = "Sonuçlar"
         st.rerun()
@@ -731,7 +745,7 @@ def render_chart_page_if_requested():
         st.exception(exc)
         return True
 
-    with st.expander("Yükseliş puanı ve teyit ayrıntıları", expanded=False):
+    with st.expander("Puan detayı", expanded=False):
         render_quality_panel(result, compact=False)
     return True
 
@@ -801,15 +815,14 @@ def render_results_page():
     meta = st.session_state._result_meta
 
     st.title("Sonuçlar")
-    st.caption("Bütün taramaların sonuçları tek yerde. Tablo satırına tıklayınca ilgili hisse grafiği açılır.")
 
     names = ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]
     active_job = _resolve_job_snapshot(auto_attach_running=True)
     if not any(sets.get(n) is not None for n in names):
         if active_job and active_job.get("status") in {"queued", "running"}:
-            st.info("Tarama ayrı worker prosesinde devam ediyor. Ekran kapansa bile iş Streamlit oturumundan bağımsızdır; geri geldiğinde checkpoint durumundan yeniden bağlanır.")
+            st.warning("Tarama devam ediyor")
         else:
-            st.info("Henüz tarama sonucu yok. Tarama sayfasından bir tarama başlatın.")
+            st.warning("Henüz sonuç yok")
             if st.button("🔎 Tarama sayfasına git", type="primary", width="stretch"):
                 set_page("Tarama")
         return
@@ -819,31 +832,60 @@ def render_results_page():
         rows = list(sets.get(name) or [])
         col.metric(name, len(rows), delta=f"{sum(q_score(r) >= 70 for r in rows)} adet 70+")
 
-    focus = st.session_state.get("_results_focus", "Özet")
-    choices = ["Özet", "Birleşik Analiz"] + names + ["Yataylık", "ATH'den Düşüş"]
+    focus = st.session_state.get("_results_focus", "Karar Tablosu")
+    choices = ["Karar Tablosu", "Özet"] + names + ["Yataylık", "ATH'den Düşüş"]
     index = choices.index(focus) if focus in choices else 0
-    view = st.selectbox("Hangi sonucu görmek istiyorsun?", choices, index=index, key="results_view_select")
+    view = st.radio("Bölüm", choices, index=index, key="results_view_select", horizontal=True, label_visibility="collapsed")
     st.session_state["_results_focus"] = view
 
-    if view == "Birleşik Analiz":
+    if view == "Karar Tablosu":
         combined_rows = build_combined_analysis(sets)
-        st.markdown("### Birleşik teknik analiz tablosu")
-        st.caption("ATH’den düşüş ve yataylık VWAP taramasında hesaplanan değerlerdir. Üçgen, düşen kırılım, alternasyon ve puanlar diğer tarama sonuçlarıyla sembol bazında birleştirilir.")
         if not combined_rows:
             st.warning("Birleştirilecek sonuç bulunamadı.")
             return
-        display_cols = [
-            "Sembol", "VWAP", "ATH'den Düşüş %", "Yataylık", "Üçgen",
-            "Düşen Kırılım", "Alternasyon", "Alternasyon Desen Puanı", "VWAP Puan", "Üçgen Puan",
-            "Trend Puan", "Alternasyon Puan", "En Yüksek Puan", "En Güçlü Sinyal",
+
+        # Karar ekranı — önce çoklu teyit, sonra puan.
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Hisse", len(combined_rows))
+        m2.metric("2+ Sinyal", sum(int(r.get("Sinyal Sayısı") or 0) >= 2 for r in combined_rows))
+        m3.metric("70+ Puan", sum(float(r.get("En Yüksek Puan") or 0) >= 70 for r in combined_rows))
+        m4.metric("3+ Sinyal", sum(int(r.get("Sinyal Sayısı") or 0) >= 3 for r in combined_rows))
+
+        f1, f2, f3 = st.columns(3)
+        with f1:
+            query = st.text_input("Hisse ara", placeholder="THYAO", key="decision_symbol_search")
+        with f2:
+            min_signal = st.selectbox("En az sinyal", [1, 2, 3, 4], index=0, key="decision_min_signal")
+        with f3:
+            min_score = st.selectbox("En az puan", [0, 50, 60, 70, 80], index=0, key="decision_min_score")
+
+        filtered = []
+        qtxt = str(query or "").strip().upper()
+        for row in combined_rows:
+            if qtxt and qtxt not in str(row.get("Sembol", "")).upper():
+                continue
+            if int(row.get("Sinyal Sayısı") or 0) < int(min_signal):
+                continue
+            if float(row.get("En Yüksek Puan") or 0) < float(min_score):
+                continue
+            filtered.append(row)
+
+        compact_cols = [
+            "Sembol", "Sinyal Sayısı", "Teyitler", "En Güçlü Sinyal",
+            "En Yüksek Puan", "Ortalama Puan", "VWAP", "ATH'den Düşüş %",
+            "Yataylık", "Üçgen", "Düşen Kırılım", "Alternasyon", "RSI 14",
+            "Dirence Alan %", "Retest",
         ]
-        cdf = pd.DataFrame([{k: row.get(k, "—") for k in display_cols} for row in combined_rows])
+        decision_df = pd.DataFrame([{k: r.get(k, "—") for k in compact_cols} for r in filtered])
         nonce = int(st.session_state.get("_result_table_nonce", 0))
         event = st.dataframe(
-            cdf, width="stretch", hide_index=True,
-            height=min(680, 80 + 35 * len(cdf)),
-            on_select="rerun", selection_mode="single-row",
-            key=f"result_table_combined_{nonce}",
+            decision_df,
+            width="stretch",
+            hide_index=True,
+            height=min(700, 82 + 36 * max(1, len(decision_df))),
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"decision_table_{nonce}",
         )
         selected_rows = []
         try:
@@ -855,19 +897,35 @@ def render_results_page():
                 selected_rows = []
         if selected_rows:
             idx2 = int(selected_rows[0])
-            if 0 <= idx2 < len(combined_rows):
-                row = combined_rows[idx2]
+            if 0 <= idx2 < len(filtered):
+                row = filtered[idx2]
                 result = row.get("_chart_result")
                 chart_view = row.get("_chart_view")
                 if result and chart_view:
                     st.session_state["_result_table_nonce"] = nonce + 1
-                    st.session_state["_results_focus"] = "Birleşik Analiz"
+                    st.session_state["_results_focus"] = "Karar Tablosu"
                     open_chart(chart_kind_for(chart_view), row.get("Sembol"), result)
-        st.download_button(
-            "⬇️ Birleşik tabloyu CSV indir",
-            cdf.to_csv(index=False).encode("utf-8-sig"),
-            file_name="birlesik_teknik_analiz.csv", mime="text/csv", width="stretch",
-        )
+
+        with st.expander("Tüm Teknik Veriler", expanded=False):
+            detail_cols = [
+                "Sembol", "Sinyal Sayısı", "Teyitler", "En Güçlü Sinyal", "Kalite",
+                "En Yüksek Puan", "Ortalama Puan",
+                "VWAP", "VWAP Kırılım", "VWAP Bar Önce", "VWAP Puan",
+                "ATH'den Düşüş %", "Yataylık",
+                "Üçgen", "Üçgen Sıkışma %", "Üçgen Puan",
+                "Düşen Kırılım", "Trend Temas", "Trend Puan",
+                "Alternasyon", "Alternasyon Desen Puanı", "Alternasyon Puan",
+                "RSI 14", "Dirence Alan %", "Hacim Oranı", "Retest", "Güçlü Teyitler",
+            ]
+            detail_df = pd.DataFrame([{k: r.get(k, "—") for k in detail_cols} for r in filtered])
+            st.dataframe(detail_df, width="stretch", hide_index=True, height=min(720, 82 + 36 * max(1, len(detail_df))))
+            st.download_button(
+                "CSV İndir",
+                detail_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="bist_karar_tablosu.csv",
+                mime="text/csv",
+                width="stretch",
+            )
         return
 
     if view == "Özet":
@@ -893,7 +951,6 @@ def render_results_page():
             }
             for _, name, r in overview_items
         ])
-        st.caption("📈 Grafiği açmak için tablodaki hisse satırına bir kez tıkla veya telefonda dokun.")
         table_nonce = int(st.session_state.get("_result_table_nonce", 0))
         overview_event = st.dataframe(
             overview_df,
@@ -1218,44 +1275,41 @@ def render_home():
     st.markdown(
         """
 <div class="hero">
-  <h2 style="margin:0 0 6px 0;">BIST Teknik Tarayıcı</h2>
-  <div class="small-muted">Dört tarama, tek akış: taramayı seç → başlat → sonuçlara git → grafiği aç.</div>
+  <h2 style="margin:0;">BIST Tarama</h2>
+  <div class="small-muted">Sade kullanım: Tara · Sonuçlar · Grafik</div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
-    st.markdown("### Ne taramak istiyorsun?")
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown('<div class="scan-card"><b>📍 VWAP</b><br><span class="small-muted">VWAP zincirinde seçilen seviyeyi son ayarlanan bar aralığında yukarı kıran hisseler.</span></div>', unsafe_allow_html=True)
-        if st.button("VWAP taramasına git", width="stretch", key="home_vwap"):
-            set_page("Tarama", "VWAP")
-        st.markdown('<div class="scan-card"><b>📉 Düşen Trend Kırılımı</b><br><span class="small-muted">Düşen direnç çizgisini yukarı kıran hisseler.</span></div>', unsafe_allow_html=True)
-        if st.button("Düşen trend taramasına git", width="stretch", key="home_trend"):
-            set_page("Tarama", "Düşen Trend")
-    with c2:
-        st.markdown('<div class="scan-card"><b>🔺 Üçgen</b><br><span class="small-muted">Sıkışmış ve kırılıma yaklaşmış üçgen formasyonları.</span></div>', unsafe_allow_html=True)
-        if st.button("Üçgen taramasına git", width="stretch", key="home_triangle"):
-            set_page("Tarama", "Üçgen")
-        st.markdown('<div class="scan-card"><b>🔀 Alternasyon</b><br><span class="small-muted">Mum alternasyonu ve yukarı yön kalite teyitleri.</span></div>', unsafe_allow_html=True)
-        if st.button("Alternasyon taramasına git", width="stretch", key="home_alt"):
-            set_page("Tarama", "Alternasyon")
-
-    st.divider()
-    st.markdown("### Son tarama sonuçları")
     cols = st.columns(4)
     for col, name in zip(cols, ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]):
         rows = list(sets.get(name) or [])
-        col.metric(name, len(rows), delta=f"{sum(q_score(r) >= 70 for r in rows)} güçlü")
+        col.metric(name, len(rows))
 
-    b1, b2 = st.columns(2)
-    with b1:
-        if st.button("🚀 Dördünü birlikte tara", type="primary", width="stretch"):
+    st.markdown("### Hızlı Başlat")
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("📍 VWAP", type="primary", width="stretch"):
+            set_page("Tarama", "VWAP")
+    with c2:
+        if st.button("🔺 Üçgen", width="stretch"):
+            set_page("Tarama", "Üçgen")
+    c3, c4 = st.columns(2)
+    with c3:
+        if st.button("📉 Düşen Trend", width="stretch"):
+            set_page("Tarama", "Düşen Trend")
+    with c4:
+        if st.button("🔀 Alternasyon", width="stretch"):
+            set_page("Tarama", "Alternasyon")
+
+    c5, c6 = st.columns(2)
+    with c5:
+        if st.button("🚀 Tümünü Tara", type="primary", width="stretch"):
             set_page("Tarama", "Tümünü Tara")
-    with b2:
-        if st.button("📊 Sonuçları aç", width="stretch"):
-            set_page("Sonuçlar", result_focus="Özet")
+    with c6:
+        if st.button("📊 Sonuçlar", width="stretch"):
+            set_page("Sonuçlar", result_focus="Karar Tablosu")
 
 
 # -----------------------------------------------------------------------------
@@ -1264,7 +1318,6 @@ def render_home():
 def render_scan_page():
     cfg = load_settings()
     st.title("Tarama")
-    st.caption("Önce tarama türünü seçin. Sadece o taramanın ayarları görünür; diğer ayarlar ekranda kalabalık yapmaz.")
 
     # Hisse listesi ve çalışma ayarları tek yerde, varsayılan kapalı.
     current_text = symbol_text_from_settings(cfg)
@@ -1302,7 +1355,7 @@ def render_scan_page():
     scan_choices = ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon", "Tümünü Tara"]
     saved_choice = st.session_state.get("_scan_type", "VWAP")
     idx = scan_choices.index(saved_choice) if saved_choice in scan_choices else 0
-    selected = st.selectbox("Ne taramak istiyorsun?", scan_choices, index=idx, key="scan_type_select")
+    selected = st.radio("Tarama Türü", scan_choices, index=idx, key="scan_type_select", horizontal=True, label_visibility="collapsed")
     st.session_state["_scan_type"] = selected
 
     if not symbols:
@@ -1311,8 +1364,7 @@ def render_scan_page():
 
     # Her taramada sadece gerekli ayarlar görünür.
     if selected == "VWAP":
-        st.markdown("### 📍 VWAP Taraması")
-        st.caption("İlk paketteki VWAP zincir mantığıyla son ayarlanan bar aralığındaki yukarı kırılımları bulur.")
+        st.markdown("### 📍 VWAP")
         c1, c2, c3 = st.columns(3)
         with c1:
             period = st.selectbox(
@@ -1329,8 +1381,7 @@ def render_scan_page():
         with c3:
             lookback = st.slider("Kırılım son kaç barda olsun?", 1, 8, int(cfg.get("lookback", 3)), key="vwap_lookback")
 
-        with st.expander("⚙️ Gelişmiş VWAP ayarları", expanded=False):
-            st.caption("Bu bölümü değiştirmek zorunda değilsiniz. Varsayılan ayarlar günlük kullanım için yeterlidir.")
+        with st.expander("⚙️ Gelişmiş VWAP", expanded=False):
             sideways_enabled = st.checkbox("Yataylık filtresini uygula", value=bool(cfg.get("sideways_enabled", False)), key="vwap_sideways")
             sideways_method = cfg.get("sideways_method", "range")
             sideways_months = list(cfg.get("sideways_months_list") or [12, 18, 24])
@@ -1466,7 +1517,7 @@ def render_scan_page():
         ])
         st.dataframe(summary_df, width="stretch", hide_index=True)
         if st.button(f"🚀 Dördünü Tara · {len(symbols)} hisse", type="primary", width="stretch"):
-            launch_background_scan("Tümünü Tara", symbols, cfg, result_focus="Özet")
+            launch_background_scan("Tümünü Tara", symbols, cfg, result_focus="Karar Tablosu")
 
 
 # -----------------------------------------------------------------------------
@@ -1474,7 +1525,7 @@ def render_scan_page():
 # -----------------------------------------------------------------------------
 st.session_state.setdefault("_app_page", "Ana Sayfa")
 st.session_state.setdefault("_scan_type", "VWAP")
-st.session_state.setdefault("_results_focus", "Özet")
+st.session_state.setdefault("_results_focus", "Karar Tablosu")
 st.session_state.setdefault("_active_job_id", None)
 st.session_state.setdefault("_synced_job_revision", -1)
 ensure_result_store()
@@ -1484,7 +1535,7 @@ if render_chart_page_if_requested():
     st.stop()
 
 with st.container(border=True):
-    st.markdown('<div class="nav-label">Menü</div>', unsafe_allow_html=True)
+    st.markdown('<div class="nav-label">BIST TARAYICI</div>', unsafe_allow_html=True)
     n1, n2, n3 = st.columns(3)
     with n1:
         if st.button("🏠 Ana Sayfa", type="primary" if st.session_state._app_page == "Ana Sayfa" else "secondary", width="stretch", key="nav_home"):
@@ -1498,12 +1549,12 @@ with st.container(border=True):
         total_results = sum(len(st.session_state._result_sets.get(n) or []) for n in ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"])
         if st.button(f"📊 Sonuçlar · {total_results}", type="primary" if st.session_state._app_page == "Sonuçlar" else "secondary", width="stretch", key="nav_results"):
             if st.session_state._app_page != "Sonuçlar":
-                set_page("Sonuçlar")
+                set_page("Sonuçlar", result_focus="Karar Tablosu")
 st.markdown('<div class="nav-spacer"></div>', unsafe_allow_html=True)
 
 notice = st.session_state.pop("_job_start_notice", None)
 if notice:
-    st.info(notice)
+    st.success(notice)
 render_live_scan_status()
 
 page = st.session_state._app_page
@@ -1514,5 +1565,4 @@ elif page == "Tarama":
 else:
     render_results_page()
 
-st.divider()
 st.caption("Yahoo Finance verisi gecikmeli olabilir. Yükseliş puanı bir yatırım garantisi değil, teknik adayları sıralama aracıdır.")
