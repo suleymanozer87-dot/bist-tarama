@@ -767,12 +767,13 @@ ALTERNATION_MIN_CHAIN = 4
 
 
 def detect_candle_alternation(df, min_chain=ALTERNATION_MIN_CHAIN):
-    """Son mumdan geriye doğru kesintisiz yeşil/kırmızı alternasyonunu bulur.
+    """Son mumdan geriye doğru gerçek mum alternasyonunu bulur.
 
-    Doji (Close == Open) artık zorla "yeşil" sayılmaz; zinciri keser. Düzenlilik
-    puanı ham TL gövde boyu yerine fiyatın yüzdesi olarak normalize edilmiş gövde
-    büyüklüklerinin varyasyon katsayısından hesaplanır. Böylece tek küçük mum bütün
-    puanı sıfıra düşürmez ve farklı fiyat seviyeleri daha adil karşılaştırılır.
+    Alternasyon artık yalnız yeşil/kırmızı renk sırası değildir. Geçerli bir
+    zincirde ardışık mum gövdeleri fiyat uzayında da birbirine bağlı kalmalıdır:
+    gövdeler tamamen kopuk/gap'li olamaz ve gövde merkezleri bir önceki muma göre
+    aşırı sıçrayamaz. Böylece görsel olarak dağınık ama renkleri tesadüfen
+    dönüşümlü mumlar yüksek Alternasyon puanı alamaz.
     """
     if df is None or len(df) < min_chain:
         return None
@@ -781,7 +782,7 @@ def detect_candle_alternation(df, min_chain=ALTERNATION_MIN_CHAIN):
     closes = df["Close"].to_numpy(dtype=float)
     n = len(df)
     diff = closes - opens
-    colors_sign = (diff > 0).astype(int) - (diff < 0).astype(int)  # +1 yeşil, -1 kırmızı, 0 doji
+    colors_sign = (diff > 0).astype(int) - (diff < 0).astype(int)
 
     if colors_sign[-1] == 0:
         return None
@@ -800,8 +801,47 @@ def detect_candle_alternation(df, min_chain=ALTERNATION_MIN_CHAIN):
 
     start_idx = n - chain_len
     end_idx = n - 1
-    raw_bodies = abs(diff[start_idx:end_idx + 1])
-    mid_prices = (abs(opens[start_idx:end_idx + 1]) + abs(closes[start_idx:end_idx + 1])) / 2.0
+    oo = opens[start_idx:end_idx + 1]
+    cc = closes[start_idx:end_idx + 1]
+    raw_bodies = abs(cc - oo)
+    body_lo = pd.Series([min(a, b) for a, b in zip(oo, cc)], dtype=float).to_numpy()
+    body_hi = pd.Series([max(a, b) for a, b in zip(oo, cc)], dtype=float).to_numpy()
+    centers = (body_lo + body_hi) / 2.0
+
+    positive_bodies = raw_bodies[raw_bodies > 1e-12]
+    if len(positive_bodies) < min_chain:
+        return None
+    median_body = float(pd.Series(positive_bodies).median())
+    if median_body <= 1e-12:
+        return None
+
+    # Fiyat geometrisi: ardışık gövdeler birbirinden tamamen kopmamalı.
+    # Ufak bir gövde boşluğuna tolerans var; bariz şekilde diğer mumun üstünde/
+    # altında açıp kapanan bir mum alternasyon zincirini bozar.
+    overlap_ratios = []
+    center_jump_ratios = []
+    hard_gap_count = 0
+    for j in range(1, len(raw_bodies)):
+        overlap = max(0.0, min(body_hi[j-1], body_hi[j]) - max(body_lo[j-1], body_lo[j]))
+        smaller = max(1e-12, min(raw_bodies[j-1], raw_bodies[j]))
+        overlap_ratio = overlap / smaller
+        overlap_ratios.append(float(min(1.0, overlap_ratio)))
+
+        gap = max(0.0, max(body_lo[j-1], body_lo[j]) - min(body_hi[j-1], body_hi[j]))
+        if gap > median_body * 0.25:
+            hard_gap_count += 1
+
+        jump = abs(centers[j] - centers[j-1]) / median_body
+        center_jump_ratios.append(float(jump))
+
+    # Herhangi bir belirgin gövde kopukluğu veya aşırı fiyat sıçraması zinciri bozar.
+    if hard_gap_count > 0:
+        return None
+    if center_jump_ratios and max(center_jump_ratios) > 1.60:
+        return None
+
+    # Gövde boyu düzenliliği (fiyata normalize).
+    mid_prices = (abs(oo) + abs(cc)) / 2.0
     body_pct = raw_bodies / pd.Series(mid_prices).replace(0, pd.NA).astype(float).to_numpy() * 100.0
     body_pct = pd.Series(body_pct).replace([float("inf"), float("-inf")], pd.NA).dropna().to_numpy(dtype=float)
     if len(body_pct) == 0:
@@ -809,15 +849,31 @@ def detect_candle_alternation(df, min_chain=ALTERNATION_MIN_CHAIN):
 
     mean_body = float(body_pct.mean())
     if mean_body <= 1e-12:
-        score = 100.0
+        regularity_score = 100.0
     else:
-        std_body = float(body_pct.std(ddof=0))
-        cv = std_body / mean_body
-        score = 100.0 / (1.0 + 2.0 * cv)
+        cv = float(body_pct.std(ddof=0)) / mean_body
+        regularity_score = 100.0 / (1.0 + 2.0 * cv)
+
+    # Gövdelerin birbirine fiyat olarak ne kadar bağlı kaldığı.
+    mean_overlap = float(pd.Series(overlap_ratios).mean()) if overlap_ratios else 1.0
+    overlap_score = max(0.0, min(100.0, 35.0 + mean_overlap * 65.0))
+
+    # Merkez sıçramaları büyüdükçe süreklilik puanı düşer.
+    mean_jump = float(pd.Series(center_jump_ratios).mean()) if center_jump_ratios else 0.0
+    continuity_score = max(0.0, min(100.0, 100.0 - mean_jump * 55.0))
+
+    # Nihai desen puanı: yalnız gövde boyu değil, gerçek görsel sıra/geometri.
+    score = regularity_score * 0.45 + overlap_score * 0.35 + continuity_score * 0.20
 
     return {
         "chain_length": chain_len,
         "score": round(max(0.0, min(100.0, score)), 1),
+        "regularity_score": round(regularity_score, 1),
+        "overlap_score": round(overlap_score, 1),
+        "continuity_score": round(continuity_score, 1),
+        "mean_body_overlap_pct": round(mean_overlap * 100.0, 1),
+        "max_center_jump_body": round(max(center_jump_ratios) if center_jump_ratios else 0.0, 2),
+        "structure_valid": True,
         "start_idx": start_idx,
         "end_idx": end_idx,
         "colors": ["yeşil" if colors_sign[i] > 0 else "kırmızı" for i in range(start_idx, end_idx + 1)],

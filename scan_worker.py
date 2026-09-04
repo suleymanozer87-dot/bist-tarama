@@ -166,17 +166,20 @@ def _enrich_actual_ath_drawdown(row, min_pct):
 
 
 def _filter_vwap_rows(rows, cfg):
-    """Eski VWAP zincirini değiştirmez; yalnız kullanıcı açıkça seçtiyse sonuç sonrası filtreler."""
+    """VWAP sonuçlarını ASLA silmez; yalnız filtre uygunluk etiketini ekler.
+
+    Eski VWAP zinciri ve eşleşme listesi aynen korunur. Yataylık / ATH'den
+    düşüş seçenekleri sonuç ekranında ayrı bir görünüm filtresi olarak kullanılır.
+    """
     out = []
     min_pct = float(cfg.get("drawdown_min_pct", 60.0))
+    sw_enabled = bool(cfg.get("sideways_enabled", False))
+    dd_enabled = bool(cfg.get("drawdown_enabled", False))
     for row in list(rows or []):
         row = _enrich_actual_ath_drawdown(row, min_pct)
-        if bool(cfg.get("sideways_enabled", False)):
-            if not bool(((row or {}).get("sideways") or {}).get("is_sideways", False)):
-                continue
-        if bool(cfg.get("drawdown_enabled", False)):
-            if not bool(((row or {}).get("drawdown") or {}).get("is_drawdown", False)):
-                continue
+        sw_ok = (not sw_enabled) or bool(((row or {}).get("sideways") or {}).get("is_sideways", False))
+        dd_ok = (not dd_enabled) or bool(((row or {}).get("drawdown") or {}).get("is_drawdown", False))
+        row["filter_pass"] = bool(sw_ok and dd_ok)
         out.append(row)
     return out
 
@@ -339,6 +342,7 @@ def run(job_id):
                 "scan_time": now_text(),
                 "checkpoint": end,
                 "before_filter_count": raw_match_count if phase == "VWAP" else None,
+                "filter_pass_count": (sum(1 for r in existing_rows if bool((r or {}).get("filter_pass", True))) if phase == "VWAP" else None),
                 "filters": ({
                     "sideways_enabled": bool(cfg.get("sideways_enabled", False)),
                     "sideways_months": list(cfg.get("sideways_months_list") or [3, 6, 12]),

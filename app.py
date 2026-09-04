@@ -335,6 +335,7 @@ def build_combined_analysis(sets):
             "Üçgen": "—",
             "Düşen Kırılım": "—",
             "Alternasyon": "—",
+            "Alternasyon Desen Puanı": "—",
             "VWAP Puan": "—",
             "Üçgen Puan": "—",
             "Trend Puan": "—",
@@ -374,6 +375,7 @@ def build_combined_analysis(sets):
         x = rec(r.get("symbol"))
         chain = r.get("chain_length")
         x["Alternasyon"] = f"✅ Evet{f' · {chain} mum' if chain else ''}"
+        x["Alternasyon Desen Puanı"] = r.get("score", "—")
         score = round(q_score(r), 1)
         x["Alternasyon Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "Alternasyon", "Alternasyon", r))
@@ -741,6 +743,7 @@ def result_rows(view, items):
                 "VWAP": r.get("last_vwap", "—"),
                 "ATH'den Düşüş %": format_drawdown_value(r),
                 "Yataylık": format_sideways_status(r),
+                "Filtre": "✅ Uygun" if bool(r.get("filter_pass", True)) else "❌ Uygun değil",
             })
         elif view == "Üçgen":
             base.update({
@@ -759,7 +762,9 @@ def result_rows(view, items):
         elif view == "Alternasyon":
             base.update({
                 "Zincir": r.get("chain_length", "—"),
-                "Düzenlilik": r.get("score", "—"),
+                "Alternasyon Desen Puanı": r.get("score", "—"),
+                "Gövde Örtüşme %": r.get("mean_body_overlap_pct", "—"),
+                "Süreklilik": r.get("continuity_score", "—"),
                 "Başlangıç": r.get("start_date", "—"),
                 "Bitiş": r.get("end_date", "—"),
             })
@@ -815,7 +820,7 @@ def render_results_page():
             return
         display_cols = [
             "Sembol", "VWAP", "ATH'den Düşüş %", "Yataylık", "Üçgen",
-            "Düşen Kırılım", "Alternasyon", "VWAP Puan", "Üçgen Puan",
+            "Düşen Kırılım", "Alternasyon", "Alternasyon Desen Puanı", "VWAP Puan", "Üçgen Puan",
             "Trend Puan", "Alternasyon Puan", "En Yüksek Puan", "En Güçlü Sinyal",
         ]
         cdf = pd.DataFrame([{k: row.get(k, "—") for k in display_cols} for row in combined_rows])
@@ -907,10 +912,22 @@ def render_results_page():
     m = meta.get(view) or {}
     errors = list(m.get("errors") or [])
 
-    # VWAP zinciri sonucu kullanıcı için doğrudan 1./2./3. VWAP olarak
-    # ayrılır. Bu yalnız sonuç görünüm filtresidir; tarama mantığını ve
-    # zincir hesabını değiştirmez.
+    # VWAP'ın HAM eşleşmeleri daima korunur. Yataylık / ATH filtresi sadece
+    # sonuç görünümünde isteğe bağlı süzme yapar; tarama sonucunu silmez.
     if view == "VWAP":
+        fs = m.get("filters") or {}
+        filters_active = bool(fs.get("sideways_enabled") or fs.get("drawdown_enabled"))
+        if filters_active:
+            pass_count = sum(1 for r in items if bool((r or {}).get("filter_pass", True)))
+            scope = st.radio(
+                "VWAP görünümü",
+                [f"Tüm VWAP'lar ({len(items)})", f"Filtreye Uyanlar ({pass_count})"],
+                horizontal=True,
+                key="vwap_filter_scope",
+            )
+            if scope.startswith("Filtreye Uyanlar"):
+                items = [r for r in items if bool((r or {}).get("filter_pass", True))]
+
         level_counts = {
             level: sum(1 for r in items if int(r.get("level") or 0) == level)
             for level in (1, 2, 3)
@@ -943,9 +960,11 @@ def render_results_page():
             active.append(f"ATH’den düşüş: AÇIK (≥ %{float(fs.get('drawdown_min_pct') or 0):.0f})")
         if active:
             before = m.get("before_filter_count")
-            after = len(items)
-            count_txt = f" · VWAP eşleşmesi {before} → filtre sonrası {after}" if before is not None else ""
-            st.success("✅ Aktif VWAP filtreleri: " + " · ".join(active) + count_txt)
+            passed = m.get("filter_pass_count")
+            if passed is None:
+                passed = sum(1 for r in list(sets.get("VWAP") or []) if bool((r or {}).get("filter_pass", True)))
+            count_txt = f" · Ham VWAP {before} · filtreye uyan {passed}" if before is not None else ""
+            st.success("✅ Aktif VWAP filtreleri: " + " · ".join(active) + count_txt + " · Ham sonuçlar silinmez.")
         else:
             st.info("VWAP ek filtresi kapalı. Yataylık ve ATH’den düşüş sonucu eleme yapmıyor.")
 
