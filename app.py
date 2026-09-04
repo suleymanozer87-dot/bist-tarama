@@ -253,6 +253,143 @@ def q_reasons(r, limit=3):
     return " · ".join((((r or {}).get("quality") or {}).get("reasons") or [])[:limit]) or "—"
 
 
+def enrich_actual_ath_drawdown(row, min_pct=60.0):
+    """VWAP stratejisini değiştirmeden sonuçtaki df üzerinden gerçek pencere ATH düşüşünü ekler."""
+    row = row or {}
+    df = row.get("df")
+    try:
+        if df is not None and len(df) and "High" in df.columns and "Close" in df.columns:
+            highs = pd.to_numeric(df["High"], errors="coerce")
+            closes = pd.to_numeric(df["Close"], errors="coerce")
+            if highs.notna().any() and closes.notna().any():
+                ath_idx = highs.idxmax()
+                ath_price = float(highs.loc[ath_idx])
+                last_close = float(closes.dropna().iloc[-1])
+                if ath_price > 0:
+                    pct = max(0.0, (ath_price - last_close) / ath_price * 100.0)
+                    try:
+                        ath_date = str(pd.Timestamp(df.loc[ath_idx, "Date"]).date()) if "Date" in df.columns else str(pd.Timestamp(ath_idx).date())
+                    except Exception:
+                        ath_date = "—"
+                    row["drawdown"] = {
+                        "is_drawdown": pct >= float(min_pct or 0),
+                        "drawdown_pct": round(pct, 1),
+                        "anchor_date": ath_date,
+                        "anchor_reason": "ATH",
+                    }
+    except Exception:
+        pass
+    return row
+
+
+def vwap_filter_passes(row, cfg):
+    """VWAP zincir mantığını değiştirmeden, kullanıcı seçtiyse sonuç sonrasında filtre uygular."""
+    row = enrich_actual_ath_drawdown(row or {}, cfg.get("drawdown_min_pct", 60.0))
+    if bool(cfg.get("sideways_enabled", False)):
+        sw = row.get("sideways") or {}
+        if not bool(sw.get("is_sideways", False)):
+            return False
+    if bool(cfg.get("drawdown_enabled", False)):
+        dd = row.get("drawdown") or {}
+        if not bool(dd.get("is_drawdown", False)):
+            return False
+    return True
+
+
+def format_sideways_status(row):
+    sw = (row or {}).get("sideways") or {}
+    if not sw:
+        return "—"
+    ok = bool(sw.get("is_sideways", False))
+    count = sw.get("sideways_count")
+    total = sw.get("total_windows")
+    months = sw.get("sideways_months") or []
+    detail = f"{count}/{total}" if count is not None and total is not None else ""
+    month_txt = ",".join(str(x) for x in months) + " ay" if months else ""
+    extra = " · ".join(x for x in (detail, month_txt) if x)
+    return ("✅ Yatay" if ok else "❌ Değil") + (f" · {extra}" if extra else "")
+
+
+def format_drawdown_value(row):
+    dd = (row or {}).get("drawdown") or {}
+    val = dd.get("drawdown_pct")
+    if val is None:
+        return "—"
+    try:
+        return round(float(val), 1)
+    except Exception:
+        return val
+
+
+def build_combined_analysis(sets):
+    """Tüm tarama sonuçlarını sembol bazında tek satırda birleştirir."""
+    by_sym = {}
+
+    def rec(sym):
+        sym = str(sym or "—").replace(".IS", "").upper()
+        return by_sym.setdefault(sym, {
+            "Sembol": sym,
+            "VWAP": "—",
+            "ATH'den Düşüş %": "—",
+            "Yataylık": "—",
+            "Üçgen": "—",
+            "Düşen Kırılım": "—",
+            "Alternasyon": "—",
+            "VWAP Puan": "—",
+            "Üçgen Puan": "—",
+            "Trend Puan": "—",
+            "Alternasyon Puan": "—",
+            "En Yüksek Puan": 0.0,
+            "En Güçlü Sinyal": "—",
+            "_chart_view": None,
+            "_chart_result": None,
+        })
+
+    signal_scores = {}
+    for r in list(sets.get("VWAP") or []):
+        x = rec(r.get("symbol"))
+        x["VWAP"] = f"{r.get('level', '—')}. VWAP"
+        x["ATH'den Düşüş %"] = format_drawdown_value(r)
+        x["Yataylık"] = format_sideways_status(r)
+        score = round(q_score(r), 1)
+        x["VWAP Puan"] = score
+        signal_scores.setdefault(x["Sembol"], []).append((score, "VWAP", "VWAP", r))
+
+    for r in list(sets.get("Üçgen") or []):
+        x = rec(r.get("symbol"))
+        x["Üçgen"] = str(r.get("pattern_type") or "Evet")
+        score = round(q_score(r), 1)
+        x["Üçgen Puan"] = score
+        signal_scores.setdefault(x["Sembol"], []).append((score, "Üçgen", "Üçgen", r))
+
+    for r in list(sets.get("Düşen Trend") or []):
+        x = rec(r.get("symbol"))
+        date = r.get("cross_date")
+        x["Düşen Kırılım"] = f"✅ Evet{f' · {date}' if date else ''}"
+        score = round(q_score(r), 1)
+        x["Trend Puan"] = score
+        signal_scores.setdefault(x["Sembol"], []).append((score, "Düşen Trend", "Düşen Trend", r))
+
+    for r in list(sets.get("Alternasyon") or []):
+        x = rec(r.get("symbol"))
+        chain = r.get("chain_length")
+        x["Alternasyon"] = f"✅ Evet{f' · {chain} mum' if chain else ''}"
+        score = round(q_score(r), 1)
+        x["Alternasyon Puan"] = score
+        signal_scores.setdefault(x["Sembol"], []).append((score, "Alternasyon", "Alternasyon", r))
+
+    for sym, x in by_sym.items():
+        choices = signal_scores.get(sym) or []
+        if choices:
+            best = max(choices, key=lambda z: z[0])
+            x["En Yüksek Puan"] = best[0]
+            x["En Güçlü Sinyal"] = best[1]
+            x["_chart_view"] = best[2]
+            x["_chart_result"] = best[3]
+
+    return sorted(by_sym.values(), key=lambda x: float(x.get("En Yüksek Puan") or 0), reverse=True)
+
+
 def normalize_error_entry(item):
     """Eski/yeni worker hata biçimlerini güvenle (sembol, mesaj) çiftine çevirir."""
     # Eski V4.6 worker bazı tuple kayıtlarını str(tuple) olarak diske yazdı.
@@ -294,10 +431,10 @@ def ensure_result_store():
     st.session_state.setdefault("_result_meta", {})
 
 
-def store_result_set(name, rows, *, total, period, errors=None, source="Tarama", currency=None):
+def store_result_set(name, rows, *, total, period, errors=None, source="Tarama", currency=None, meta_extra=None):
     ensure_result_store()
     st.session_state._result_sets[name] = list(rows or [])
-    st.session_state._result_meta[name] = {
+    meta = {
         "total": int(total or 0),
         "period": period,
         "errors": list(errors or []),
@@ -305,6 +442,9 @@ def store_result_set(name, rows, *, total, period, errors=None, source="Tarama",
         "currency": currency,
         "scan_time": datetime.now().strftime("%d.%m.%Y %H:%M"),
     }
+    if meta_extra:
+        meta.update(dict(meta_extra))
+    st.session_state._result_meta[name] = meta
 
 
 def set_page(page, scan_type=None, result_focus=None):
@@ -599,6 +739,8 @@ def result_rows(view, items):
                 "Bar Önce": r.get("bars_ago", "—"),
                 "Son Kapanış": r.get("last_close", "—"),
                 "VWAP": r.get("last_vwap", "—"),
+                "ATH'den Düşüş %": format_drawdown_value(r),
+                "Yataylık": format_sideways_status(r),
             })
         elif view == "Üçgen":
             base.update({
@@ -659,10 +801,55 @@ def render_results_page():
         col.metric(name, len(rows), delta=f"{sum(q_score(r) >= 70 for r in rows)} adet 70+")
 
     focus = st.session_state.get("_results_focus", "Özet")
-    choices = ["Özet"] + names
+    choices = ["Özet", "Birleşik Analiz"] + names
     index = choices.index(focus) if focus in choices else 0
     view = st.selectbox("Hangi sonucu görmek istiyorsun?", choices, index=index, key="results_view_select")
     st.session_state["_results_focus"] = view
+
+    if view == "Birleşik Analiz":
+        combined_rows = build_combined_analysis(sets)
+        st.markdown("### Birleşik teknik analiz tablosu")
+        st.caption("ATH’den düşüş ve yataylık VWAP taramasında hesaplanan değerlerdir. Üçgen, düşen kırılım, alternasyon ve puanlar diğer tarama sonuçlarıyla sembol bazında birleştirilir.")
+        if not combined_rows:
+            st.warning("Birleştirilecek sonuç bulunamadı.")
+            return
+        display_cols = [
+            "Sembol", "VWAP", "ATH'den Düşüş %", "Yataylık", "Üçgen",
+            "Düşen Kırılım", "Alternasyon", "VWAP Puan", "Üçgen Puan",
+            "Trend Puan", "Alternasyon Puan", "En Yüksek Puan", "En Güçlü Sinyal",
+        ]
+        cdf = pd.DataFrame([{k: row.get(k, "—") for k in display_cols} for row in combined_rows])
+        nonce = int(st.session_state.get("_result_table_nonce", 0))
+        event = st.dataframe(
+            cdf, width="stretch", hide_index=True,
+            height=min(680, 80 + 35 * len(cdf)),
+            on_select="rerun", selection_mode="single-row",
+            key=f"result_table_combined_{nonce}",
+        )
+        selected_rows = []
+        try:
+            selected_rows = list(event.selection.rows)
+        except Exception:
+            try:
+                selected_rows = list((event or {}).get("selection", {}).get("rows", []))
+            except Exception:
+                selected_rows = []
+        if selected_rows:
+            idx2 = int(selected_rows[0])
+            if 0 <= idx2 < len(combined_rows):
+                row = combined_rows[idx2]
+                result = row.get("_chart_result")
+                chart_view = row.get("_chart_view")
+                if result and chart_view:
+                    st.session_state["_result_table_nonce"] = nonce + 1
+                    st.session_state["_results_focus"] = "Birleşik Analiz"
+                    open_chart(chart_kind_for(chart_view), row.get("Sembol"), result)
+        st.download_button(
+            "⬇️ Birleşik tabloyu CSV indir",
+            cdf.to_csv(index=False).encode("utf-8-sig"),
+            file_name="birlesik_teknik_analiz.csv", mime="text/csv", width="stretch",
+        )
+        return
 
     if view == "Özet":
         combined = []
@@ -746,6 +933,21 @@ def render_results_page():
         f"Periyot: **{m.get('period') or '—'}** · Taranan: **{m.get('total') or '—'}** · "
         f"Tarama: **{m.get('scan_time') or '—'}** · Veri hatası: **{len(errors)}**"
     )
+    if view == "VWAP":
+        fs = m.get("filters") or {}
+        active = []
+        if fs.get("sideways_enabled"):
+            months = ", ".join(str(x) for x in (fs.get("sideways_months") or []))
+            active.append(f"Yataylık: AÇIK ({months or 'seçili vadeler'} ay)")
+        if fs.get("drawdown_enabled"):
+            active.append(f"ATH’den düşüş: AÇIK (≥ %{float(fs.get('drawdown_min_pct') or 0):.0f})")
+        if active:
+            before = m.get("before_filter_count")
+            after = len(items)
+            count_txt = f" · VWAP eşleşmesi {before} → filtre sonrası {after}" if before is not None else ""
+            st.success("✅ Aktif VWAP filtreleri: " + " · ".join(active) + count_txt)
+        else:
+            st.info("VWAP ek filtresi kapalı. Yataylık ve ATH’den düşüş sonucu eleme yapmıyor.")
 
     f1, f2 = st.columns(2)
     with f1:
@@ -850,9 +1052,24 @@ def run_vwap_scan(symbols, cfg, progress=None, start=0.0, span=1.0, source="VWAP
         triangle_enabled=False,
         currency=str(cfg.get("currency", "TRY")),
     )
+    results = [enrich_actual_ath_drawdown(r, cfg.get("drawdown_min_pct", 60.0)) for r in results]
+    raw_count = len(results)
+    results = [r for r in results if vwap_filter_passes(r, cfg)]
     store_result_set(
         "VWAP", results, total=len(symbols), period=PERIOD_LABELS.get(cfg.get("period"), cfg.get("period")),
         errors=errors, source=source, currency=cfg.get("currency"),
+        meta_extra={
+            "before_filter_count": raw_count,
+            "filters": {
+                "sideways_enabled": bool(cfg.get("sideways_enabled", False)),
+                "sideways_months": list(cfg.get("sideways_months_list") or [3, 6, 12]),
+                "sideways_method": str(cfg.get("sideways_method", "range")),
+                "sideways_range_pct": float(cfg.get("sideways_range_pct", 15.0)),
+                "sideways_atr_pct": float(cfg.get("sideways_atr_pct", 5.0)),
+                "drawdown_enabled": bool(cfg.get("drawdown_enabled", False)),
+                "drawdown_min_pct": float(cfg.get("drawdown_min_pct", 60.0)),
+            },
+        },
     )
     return results, errors
 
@@ -1048,7 +1265,7 @@ def render_scan_page():
 
         with st.expander("⚙️ Gelişmiş VWAP ayarları", expanded=False):
             st.caption("Bu bölümü değiştirmek zorunda değilsiniz. Varsayılan ayarlar günlük kullanım için yeterlidir.")
-            sideways_enabled = st.checkbox("Yataylık bilgisini de hesapla", value=bool(cfg.get("sideways_enabled", False)), key="vwap_sideways")
+            sideways_enabled = st.checkbox("Yataylık filtresini uygula", value=bool(cfg.get("sideways_enabled", False)), key="vwap_sideways")
             sideways_method = cfg.get("sideways_method", "range")
             sideways_months = list(cfg.get("sideways_months_list") or [3, 6, 12])
             sideways_range = float(cfg.get("sideways_range_pct", 15.0))
@@ -1061,10 +1278,17 @@ def render_scan_page():
                 with a2:
                     sideways_range = st.slider("Maks. fiyat aralığı %", 5.0, 50.0, sideways_range, 1.0, key="vwap_sideways_range")
                     sideways_atr = st.slider("Maks. ATR %", 1.0, 15.0, sideways_atr, .5, key="vwap_sideways_atr")
-            drawdown_enabled = st.checkbox("Zirveden düşüş bilgisini de hesapla", value=bool(cfg.get("drawdown_enabled", False)), key="vwap_drawdown")
+            drawdown_enabled = st.checkbox("ATH’den düşüş filtresini uygula", value=bool(cfg.get("drawdown_enabled", False)), key="vwap_drawdown")
             drawdown_min = float(cfg.get("drawdown_min_pct", 60.0))
             if drawdown_enabled:
-                drawdown_min = st.slider("En az zirveden düşüş %", 10.0, 90.0, drawdown_min, 5.0, key="vwap_drawdown_min")
+                drawdown_min = st.slider("En az ATH’den düşüş %", 10.0, 90.0, drawdown_min, 5.0, key="vwap_drawdown_min")
+            if sideways_enabled or drawdown_enabled:
+                active_parts = []
+                if sideways_enabled:
+                    active_parts.append("Yataylık şartını geçmeyen VWAP sonuçları elenir")
+                if drawdown_enabled:
+                    active_parts.append(f"ATH’den en az %{drawdown_min:.0f} düşmeyen VWAP sonuçları elenir")
+                st.info("AKTİF FİLTRE: " + " · ".join(active_parts))
 
         save_partial_settings({
             "period": period, "currency": currency, "lookback": lookback,

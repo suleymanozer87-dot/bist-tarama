@@ -137,6 +137,50 @@ def _dedupe_errors(items):
     return out
 
 
+def _enrich_actual_ath_drawdown(row, min_pct):
+    """Sonuç df'sinden gerçek pencere ATH -> son kapanış düşüşünü hesaplar; VWAP zincirine dokunmaz."""
+    row = row or {}
+    df = row.get("df")
+    try:
+        if df is not None and len(df) and "High" in df.columns and "Close" in df.columns:
+            highs = df["High"].astype(float)
+            closes = df["Close"].astype(float)
+            ath_pos = int(highs.values.argmax())
+            ath_price = float(highs.iloc[ath_pos])
+            last_close = float(closes.iloc[-1])
+            if ath_price > 0:
+                pct = max(0.0, (ath_price - last_close) / ath_price * 100.0)
+                try:
+                    ath_date = str(df["Date"].iloc[ath_pos])[:10] if "Date" in df.columns else str(df.index[ath_pos])[:10]
+                except Exception:
+                    ath_date = "—"
+                row["drawdown"] = {
+                    "is_drawdown": pct >= float(min_pct or 0),
+                    "drawdown_pct": round(pct, 1),
+                    "anchor_date": ath_date,
+                    "anchor_reason": "ATH",
+                }
+    except Exception:
+        pass
+    return row
+
+
+def _filter_vwap_rows(rows, cfg):
+    """Eski VWAP zincirini değiştirmez; yalnız kullanıcı açıkça seçtiyse sonuç sonrası filtreler."""
+    out = []
+    min_pct = float(cfg.get("drawdown_min_pct", 60.0))
+    for row in list(rows or []):
+        row = _enrich_actual_ath_drawdown(row, min_pct)
+        if bool(cfg.get("sideways_enabled", False)):
+            if not bool(((row or {}).get("sideways") or {}).get("is_sideways", False)):
+                continue
+        if bool(cfg.get("drawdown_enabled", False)):
+            if not bool(((row or {}).get("drawdown") or {}).get("is_drawdown", False)):
+                continue
+        out.append(row)
+    return out
+
+
 def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
     max_workers = int(cfg.get("max_workers", 20))
     use_cache = bool(cfg.get("use_cache", True))
@@ -162,10 +206,11 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
             triangle_enabled=False,
             currency=str(cfg.get("currency", "TRY")),
         )
-        return results
+        filtered = _filter_vwap_rows(results, cfg)
+        return {"rows": filtered, "raw_count": len(results)}
 
     if phase == "Üçgen":
-        return scan_triangle_symbols_parallel(
+        return {"rows": scan_triangle_symbols_parallel(
             symbols,
             cfg.get("tri_scan_period", "4h"),
             max_workers=max_workers,
@@ -178,10 +223,10 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
             min_apex_bars_ahead=int(cfg.get("tri_scan_min_apex_bars_ahead", 1)),
             max_apex_bars_ahead=int(cfg.get("tri_scan_max_apex_bars_ahead", 40)),
             max_squeeze_pct=float(cfg.get("tri_scan_max_squeeze_pct", 50.0)),
-        )
+        )}
 
     if phase == "Düşen Trend":
-        return scan_trendline_symbols_parallel(
+        return {"rows": scan_trendline_symbols_parallel(
             symbols,
             cfg.get("tl_scan_period", "1h"),
             max_workers=max_workers,
@@ -196,7 +241,7 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
             require_volume=bool(cfg.get("tl_scan_require_volume", True)),
             volume_factor=float(cfg.get("tl_scan_volume_factor", 1.5)),
             min_touches=int(cfg.get("tl_scan_min_touches", 3)),
-        )
+        )}
 
     if phase == "Alternasyon":
         min_score = cfg.get("alt_scan_min_score")
@@ -204,7 +249,7 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
             min_score = None
         else:
             min_score = float(min_score)
-        return scan_alternation_symbols_parallel(
+        return {"rows": scan_alternation_symbols_parallel(
             symbols,
             cfg.get("alt_scan_period", "monthly"),
             max_workers=max_workers,
@@ -213,7 +258,7 @@ def _scan_chunk(phase, symbols, cfg, progress_cb, errors):
             errors_out=errors,
             min_chain=int(cfg.get("alt_scan_min_chain", 3)),
             min_score=min_score,
-        )
+        )}
     raise ValueError(f"Bilinmeyen faz: {phase}")
 
 
@@ -250,6 +295,7 @@ def run(job_id):
         existing_rows = list(payload["result_sets"].get(phase) or [])
         existing_meta = dict(payload["result_meta"].get(phase) or {})
         all_errors = list(existing_meta.get("errors") or [])
+        raw_match_count = int(existing_meta.get("before_filter_count") or 0)
 
         while phase_cursor < len(symbols):
             end = min(len(symbols), phase_cursor + chunk_size)
@@ -276,7 +322,11 @@ def run(job_id):
                 })
                 worker_write_state(job_id, s)
 
-            new_rows = _scan_chunk(phase, chunk, cfg, progress_cb, chunk_errors)
+            scan_out = _scan_chunk(phase, chunk, cfg, progress_cb, chunk_errors)
+            new_rows = list((scan_out or {}).get("rows") or [])
+            raw_chunk_count = (scan_out or {}).get("raw_count")
+            if phase == "VWAP" and raw_chunk_count is not None:
+                raw_match_count += int(raw_chunk_count or 0)
             existing_rows = _merge_rows(existing_rows, new_rows)
             all_errors = _dedupe_errors(all_errors + chunk_errors)
             payload["result_sets"][phase] = existing_rows
@@ -288,6 +338,16 @@ def run(job_id):
                 "currency": cfg.get("currency") if phase == "VWAP" else None,
                 "scan_time": now_text(),
                 "checkpoint": end,
+                "before_filter_count": raw_match_count if phase == "VWAP" else None,
+                "filters": ({
+                    "sideways_enabled": bool(cfg.get("sideways_enabled", False)),
+                    "sideways_months": list(cfg.get("sideways_months_list") or [3, 6, 12]),
+                    "sideways_method": str(cfg.get("sideways_method", "range")),
+                    "sideways_range_pct": float(cfg.get("sideways_range_pct", 15.0)),
+                    "sideways_atr_pct": float(cfg.get("sideways_atr_pct", 5.0)),
+                    "drawdown_enabled": bool(cfg.get("drawdown_enabled", False)),
+                    "drawdown_min_pct": float(cfg.get("drawdown_min_pct", 60.0)),
+                } if phase == "VWAP" else {}),
             }
             # Önce sonucu kaydet, sonra cursor'u ilerlet. Çökme anında aynı blok
             # tekrar işlenirse _merge_rows duplicate'i temizler.
