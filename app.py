@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import html
+import copy
 from datetime import datetime
 
 import pandas as pd
@@ -229,11 +230,26 @@ DEFAULT_SETTINGS = {
     "tri_scan_min_apex_bars_ahead": 1,
     "tri_scan_max_apex_bars_ahead": 40,
     "tri_scan_max_squeeze_pct": 50.0,
+    "last_scan_type": "VWAP",
+    "ui_results_view": "Karar Tablosu",
+    "result_prefs": {
+        "Karar Tablosu": {
+            "query": "", "min_signal": 1, "min_score": 0,
+            "required_signals": [], "sort": "Sinyal Sayısı ↓",
+        },
+        "VWAP": {
+            "quality": "Tümü", "search": "", "sort": "Yükseliş Puanı ↓",
+            "scope": "Tüm", "level": 0,
+        },
+        "Üçgen": {"quality": "Tümü", "search": "", "sort": "Yükseliş Puanı ↓"},
+        "Düşen Trend": {"quality": "Tümü", "search": "", "sort": "Yükseliş Puanı ↓"},
+        "Alternasyon": {"quality": "Tümü", "search": "", "sort": "Yükseliş Puanı ↓"},
+    },
 }
 
 
 def load_settings():
-    cfg = dict(DEFAULT_SETTINGS)
+    cfg = copy.deepcopy(DEFAULT_SETTINGS)
     try:
         if os.path.exists(SETTINGS_PATH):
             with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
@@ -253,6 +269,64 @@ def save_partial_settings(updates):
             json.dump(cfg, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
+
+def save_partial_settings_if_changed(updates):
+    cfg = load_settings()
+    changed = any(cfg.get(k) != v for k, v in (updates or {}).items())
+    if changed:
+        save_partial_settings(updates)
+
+
+def get_result_pref(view, key, default=None):
+    cfg = load_settings()
+    prefs = cfg.get("result_prefs") or {}
+    view_prefs = prefs.get(view) or {}
+    return copy.deepcopy(view_prefs.get(key, default))
+
+
+def save_result_pref(view, key, value):
+    cfg = load_settings()
+    prefs = copy.deepcopy(cfg.get("result_prefs") or {})
+    view_prefs = copy.deepcopy(prefs.get(view) or {})
+    if view_prefs.get(key) == value:
+        return
+    view_prefs[key] = copy.deepcopy(value)
+    prefs[view] = view_prefs
+    save_partial_settings({"result_prefs": prefs})
+
+
+def init_widget_state(widget_key, value):
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = copy.deepcopy(value)
+
+
+def persist_result_widget(view, pref_key, widget_key):
+    save_result_pref(view, pref_key, st.session_state.get(widget_key))
+
+
+def persist_global_widget(setting_key, widget_key):
+    save_partial_settings_if_changed({setting_key: st.session_state.get(widget_key)})
+
+
+def reset_all_settings():
+    try:
+        with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+            json.dump(copy.deepcopy(DEFAULT_SETTINGS), f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+    prefixes = (
+        "decision_", "quality_", "search_", "sort_", "vwap_", "tri_", "tl_", "alt_",
+        "general_", "symbol_list_text", "results_view_select", "scan_type_select",
+        "reset_settings_",
+    )
+    for key in list(st.session_state.keys()):
+        if any(str(key).startswith(prefix) for prefix in prefixes):
+            st.session_state.pop(key, None)
+    st.session_state["_scan_type"] = DEFAULT_SETTINGS["last_scan_type"]
+    st.session_state["_results_focus"] = DEFAULT_SETTINGS["ui_results_view"]
+    st.session_state["_settings_reset_notice"] = True
+    st.rerun()
 
 
 def read_bist_list_text():
@@ -1207,11 +1281,19 @@ def render_results_page():
                 set_page("Tarama")
         return
 
-    focus = st.session_state.get("_results_focus", "Karar Tablosu")
+    cfg_ui = load_settings()
+    focus = st.session_state.get("_results_focus") or cfg_ui.get("ui_results_view", "Karar Tablosu")
     choices = ["Karar Tablosu", "Özet"] + names + ["Yataylık", "ATH'den Düşüş"]
-    index = choices.index(focus) if focus in choices else 0
-    view = st.radio("Bölüm", choices, index=index, key="results_view_select", horizontal=True, label_visibility="collapsed", format_func=lambda x: {"Karar Tablosu":"Karar", "Düşen Trend":"Trend", "Alternasyon":"Alt", "ATH'den Düşüş":"Düşüş"}.get(x, x))
+    if focus not in choices:
+        focus = "Karar Tablosu"
+    init_widget_state("results_view_select", focus)
+    view = st.radio(
+        "Bölüm", choices, key="results_view_select", horizontal=True, label_visibility="collapsed",
+        format_func=lambda x: {"Karar Tablosu":"Karar", "Düşen Trend":"Trend", "Alternasyon":"Alt", "ATH'den Düşüş":"Düşüş"}.get(x, x),
+        on_change=persist_global_widget, args=("ui_results_view", "results_view_select"),
+    )
     st.session_state["_results_focus"] = view
+    save_partial_settings_if_changed({"ui_results_view": view})
 
     if view == "Karar Tablosu":
         combined_rows = build_combined_analysis(sets)
@@ -1221,17 +1303,37 @@ def render_results_page():
 
         render_result_stats(combined_rows)
 
+        decision_defaults = {
+            "query": get_result_pref("Karar Tablosu", "query", ""),
+            "min_signal": get_result_pref("Karar Tablosu", "min_signal", 1),
+            "min_score": get_result_pref("Karar Tablosu", "min_score", 0),
+            "required_signals": get_result_pref("Karar Tablosu", "required_signals", []),
+            "sort": get_result_pref("Karar Tablosu", "sort", "Sinyal Sayısı ↓"),
+        }
+        init_widget_state("decision_symbol_search", decision_defaults["query"])
+        init_widget_state("decision_min_signal", decision_defaults["min_signal"])
+        init_widget_state("decision_min_score", decision_defaults["min_score"])
+        init_widget_state("decision_required_signals", decision_defaults["required_signals"])
+        init_widget_state("decision_sort_mode", decision_defaults["sort"])
+
         f1, f2, f3, f4, f5 = st.columns([1.25, .8, .8, 1.25, 1.15])
         with f1:
-            query = st.text_input("Hisse", placeholder="THYAO", key="decision_symbol_search")
+            query = st.text_input("Hisse", placeholder="THYAO", key="decision_symbol_search", on_change=persist_result_widget, args=("Karar Tablosu", "query", "decision_symbol_search"))
         with f2:
-            min_signal = st.selectbox("Min. sinyal", [1, 2, 3, 4], index=0, key="decision_min_signal")
+            min_signal = st.selectbox("Min. sinyal", [1, 2, 3, 4], key="decision_min_signal", on_change=persist_result_widget, args=("Karar Tablosu", "min_signal", "decision_min_signal"))
         with f3:
-            min_score = st.selectbox("Min. puan", [0, 50, 60, 70, 80], index=0, key="decision_min_score")
+            min_score = st.selectbox("Min. puan", [0, 50, 60, 70, 80], key="decision_min_score", on_change=persist_result_widget, args=("Karar Tablosu", "min_score", "decision_min_score"))
         with f4:
-            required_signals = st.multiselect("Sinyal", ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"], default=[], key="decision_required_signals", placeholder="Tümü")
+            required_signals = st.multiselect("Sinyal", ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"], key="decision_required_signals", placeholder="Tümü", on_change=persist_result_widget, args=("Karar Tablosu", "required_signals", "decision_required_signals"))
         with f5:
-            sort_mode = st.selectbox("Sırala", ["Sinyal Sayısı ↓", "En Yüksek Puan ↓", "Ortalama Puan ↓", "RSI 14 ↓", "Hacim Oranı ↓", "ATH / Anchor Düşüş ↓", "Sembol A-Z"], index=0, key="decision_sort_mode")
+            sort_mode = st.selectbox("Sırala", ["Sinyal Sayısı ↓", "En Yüksek Puan ↓", "Ortalama Puan ↓", "RSI 14 ↓", "Hacim Oranı ↓", "ATH / Anchor Düşüş ↓", "Sembol A-Z"], key="decision_sort_mode", on_change=persist_result_widget, args=("Karar Tablosu", "sort", "decision_sort_mode"))
+
+        # Mobilde filtreyi değiştirip hemen karta dokunulsa bile son değerleri kalıcılaştır.
+        save_result_pref("Karar Tablosu", "query", query)
+        save_result_pref("Karar Tablosu", "min_signal", min_signal)
+        save_result_pref("Karar Tablosu", "min_score", min_score)
+        save_result_pref("Karar Tablosu", "required_signals", list(required_signals or []))
+        save_result_pref("Karar Tablosu", "sort", sort_mode)
 
         filtered = []
         qtxt = str(query or "").strip().upper()
@@ -1326,31 +1428,53 @@ def render_results_page():
         filters_active = bool(fs.get("sideways_enabled") or fs.get("drawdown_enabled"))
         if filters_active:
             pass_count = sum(1 for r in items if bool((r or {}).get("filter_pass", True)))
-            scope = st.radio("VWAP görünümü", [f"Tüm VWAP'lar ({len(items)})", f"Filtreye Uyanlar ({pass_count})"], horizontal=True, key="vwap_filter_scope")
-            if scope.startswith("Filtreye Uyanlar"):
+            scope_mode = get_result_pref("VWAP", "scope", "Tüm")
+            scope_options = [f"Tüm VWAP'lar ({len(items)})", f"Filtreye Uyanlar ({pass_count})"]
+            scope_default = scope_options[1] if scope_mode == "Filtre" else scope_options[0]
+            init_widget_state("vwap_filter_scope", scope_default)
+            scope = st.radio("VWAP görünümü", scope_options, horizontal=True, key="vwap_filter_scope")
+            scope_mode_now = "Filtre" if scope.startswith("Filtreye Uyanlar") else "Tüm"
+            save_result_pref("VWAP", "scope", scope_mode_now)
+            if scope_mode_now == "Filtre":
                 items = [r for r in items if bool((r or {}).get("filter_pass", True))]
         level_counts = {level: sum(1 for r in items if int(r.get("level") or 0) == level) for level in (1, 2, 3)}
         level_options = [f"Tümü ({len(items)})", f"1. VWAP ({level_counts[1]})", f"2. VWAP ({level_counts[2]})", f"3. VWAP ({level_counts[3]})"]
+        saved_level = int(get_result_pref("VWAP", "level", 0) or 0)
+        level_default = next((x for x in level_options if (saved_level == 0 and x.startswith("Tümü")) or (saved_level and x.startswith(f"{saved_level}. VWAP"))), level_options[0])
+        init_widget_state("vwap_level_filter", level_default)
         level_choice = st.radio("VWAP seviyesi", level_options, horizontal=True, key="vwap_level_filter")
-        if not level_choice.startswith("Tümü"):
-            selected_level = int(level_choice.split(".", 1)[0])
+        selected_level = 0 if level_choice.startswith("Tümü") else int(level_choice.split(".", 1)[0])
+        save_result_pref("VWAP", "level", selected_level)
+        if selected_level:
             items = [r for r in items if int(r.get("level") or 0) == selected_level]
 
     st.caption(f"{m.get('period') or '—'} · {m.get('total') or '—'} hisse · {len(errors)} hata")
 
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        min_quality_label = st.selectbox("En düşük kalite", ["Tümü", "60+", "70+", "80+"], index=0, key=f"quality_{view}")
-    with f2:
-        search = st.text_input("Hisse ara", placeholder="Örn: THYAO", key=f"search_{view}")
+    quality_key = f"quality_{view}"
+    search_key = f"search_{view}"
+    sort_key = f"sort_{view}"
+    init_widget_state(quality_key, get_result_pref(view, "quality", "Tümü"))
+    init_widget_state(search_key, get_result_pref(view, "search", ""))
     sort_options = {
         "VWAP": ["Yükseliş Puanı ↓", "VWAP Seviyesi ↓", "Bar Önce ↑", "ATH / Anchor Düşüş ↓", "Sembol A-Z"],
         "Üçgen": ["Yükseliş Puanı ↓", "Sıkışma % ↑", "Sembol A-Z"],
         "Düşen Trend": ["Yükseliş Puanı ↓", "Temas ↓", "Bar Önce ↑", "Sembol A-Z"],
         "Alternasyon": ["Yükseliş Puanı ↓", "Desen Puanı ↓", "Zincir ↓", "Sembol A-Z"],
     }
+    saved_sort = get_result_pref(view, "sort", "Yükseliş Puanı ↓")
+    if saved_sort not in sort_options.get(view, []):
+        saved_sort = sort_options.get(view, ["Yükseliş Puanı ↓"])[0]
+    init_widget_state(sort_key, saved_sort)
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        min_quality_label = st.selectbox("En düşük kalite", ["Tümü", "60+", "70+", "80+"], key=quality_key, on_change=persist_result_widget, args=(view, "quality", quality_key))
+    with f2:
+        search = st.text_input("Hisse ara", placeholder="Örn: THYAO", key=search_key, on_change=persist_result_widget, args=(view, "search", search_key))
     with f3:
-        sort_mode = st.selectbox("Sırala", sort_options.get(view, ["Yükseliş Puanı ↓", "Sembol A-Z"]), index=0, key=f"sort_{view}")
+        sort_mode = st.selectbox("Sırala", sort_options.get(view, ["Yükseliş Puanı ↓", "Sembol A-Z"]), key=sort_key, on_change=persist_result_widget, args=(view, "sort", sort_key))
+    save_result_pref(view, "quality", min_quality_label)
+    save_result_pref(view, "search", search)
+    save_result_pref(view, "sort", sort_mode)
     min_score = {"Tümü": 0, "60+": 60, "70+": 70, "80+": 80}[min_quality_label]
     filtered = [r for r in items if q_score(r) >= min_score]
     if search.strip():
@@ -1586,10 +1710,13 @@ def render_scan_page():
     save_partial_settings({"son_semboller_text": manual_text, "max_workers": max_workers, "use_cache": use_cache})
 
     scan_choices = ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon", "Tümünü Tara"]
-    saved_choice = st.session_state.get("_scan_type", "VWAP")
-    idx = scan_choices.index(saved_choice) if saved_choice in scan_choices else 0
-    selected = st.radio("Tarama Türü", scan_choices, index=idx, key="scan_type_select", horizontal=True, label_visibility="collapsed")
+    saved_choice = st.session_state.get("_scan_type") or cfg.get("last_scan_type", "VWAP")
+    if saved_choice not in scan_choices:
+        saved_choice = "VWAP"
+    init_widget_state("scan_type_select", saved_choice)
+    selected = st.radio("Tarama Türü", scan_choices, key="scan_type_select", horizontal=True, label_visibility="collapsed", on_change=persist_global_widget, args=("last_scan_type", "scan_type_select"))
     st.session_state["_scan_type"] = selected
+    save_partial_settings_if_changed({"last_scan_type": selected})
 
     if not symbols:
         st.error("Taranacak hisse listesi boş. 'Hisse Listesi ve Genel Ayarlar' bölümünden hisse ekleyin.")
@@ -1752,13 +1879,23 @@ def render_scan_page():
         if st.button(f"🚀 Dördünü Tara · {len(symbols)} hisse", type="primary", width="stretch"):
             launch_background_scan("Tümünü Tara", symbols, cfg, result_focus="Karar Tablosu")
 
+    st.markdown("---")
+    with st.expander("⚙️ Ayar Yönetimi", expanded=False):
+        st.caption("Tarama ayarları ve Sonuçlar ekranındaki filtre/sıralamalar otomatik kaydedilir.")
+        confirm_key = "reset_settings_confirm"
+        init_widget_state(confirm_key, False)
+        confirmed = st.checkbox("Tüm kayıtlı ayarları varsayılana döndür", key=confirm_key)
+        if st.button("Tüm Ayarları Sıfırla", type="secondary", width="stretch", disabled=not confirmed, key="reset_settings_button"):
+            reset_all_settings()
+
 
 # -----------------------------------------------------------------------------
 # Üst navigasyon ve uygulama yönlendirmesi
 # -----------------------------------------------------------------------------
+_startup_cfg = load_settings()
 st.session_state.setdefault("_app_page", "Ana Sayfa")
-st.session_state.setdefault("_scan_type", "VWAP")
-st.session_state.setdefault("_results_focus", "Karar Tablosu")
+st.session_state.setdefault("_scan_type", _startup_cfg.get("last_scan_type", "VWAP"))
+st.session_state.setdefault("_results_focus", _startup_cfg.get("ui_results_view", "Karar Tablosu"))
 st.session_state.setdefault("_active_job_id", None)
 st.session_state.setdefault("_synced_job_revision", -1)
 ensure_result_store()
