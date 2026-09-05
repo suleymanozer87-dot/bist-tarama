@@ -3,8 +3,10 @@ name: BIST Otomatik Tarama
 on:
   schedule:
     # Türkiye saati 10:00-18:00 aralığında 5 dakikada bir sadece SAAT KONTROLÜ yapar.
-    # Gerçek tarama SCAN_TIMES saatlerinde çalışır.
+    # Gerçek tarama yalnızca SCAN_TIMES içinde tanımlanan saatlerde çalışır.
     - cron: '*/5 7-15 * * 1-5'
+
+  # İstediğinde GitHub Actions içinden manuel çalıştırabilirsin.
   workflow_dispatch:
 
 concurrency:
@@ -15,6 +17,7 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 55
+
     permissions:
       contents: read
 
@@ -50,17 +53,26 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          # Eski / temel GitHub Variables ayarları
           SCAN_TIMES: ${{ vars.SCAN_TIMES }}
           AUTO_SCAN_ENABLED: ${{ vars.AUTO_SCAN_ENABLED }}
           AUTO_MIN_SCORE: ${{ vars.AUTO_MIN_SCORE }}
           AUTO_MIN_SIGNALS: ${{ vars.AUTO_MIN_SIGNALS }}
           AUTO_SCAN_MODE: ${{ vars.AUTO_SCAN_MODE }}
           APP_URL: ${{ vars.APP_URL }}
+
+          # V6.1: Sitedeki "Otomatik Tarama ve Telegram" ayar merkezinden
+          # GitHub'a kaydedilen güncel tüm ayarlar.
+          AUTO_SCAN_CONFIG_JSON: ${{ vars.AUTO_SCAN_CONFIG_JSON }}
+
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manuel tarama başlatılıyor..."
             python auto_scan.py --force
           else
+            echo "Planlı saat kontrolü yapılıyor..."
             python auto_scan.py --scheduled
           fi
 
