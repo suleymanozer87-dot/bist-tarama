@@ -415,42 +415,25 @@ def render_alternation_chart(sym: str, r: Dict[str, Any], key: Optional[str] = N
     _render_lwc_chart(spec,key=key,height=650)
 
 
-def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] = None) -> None:
-    signals = (payload or {}).get("signals") or {}
-    base = None
-    for name in ("VWAP", "Üçgen", "Düşen Trend", "Alternasyon"):
-        item = signals.get(name)
-        if isinstance(item, dict) and isinstance(item.get("df"), pd.DataFrame) and len(item.get("df")) > 0:
-            base = item
-            break
-    if not base:
-        import streamlit as st
-        st.warning("Birleşik grafiği çizmek için veri bulunamadı.")
-        return
+def _same_df_shape(a: Any, b: Any) -> bool:
+    try:
+        if not isinstance(a, pd.DataFrame) or not isinstance(b, pd.DataFrame):
+            return False
+        if len(a) != len(b):
+            return False
+        if "Date" in a.columns and "Date" in b.columns:
+            da = pd.to_datetime(a["Date"], errors="coerce").reset_index(drop=True)
+            db = pd.to_datetime(b["Date"], errors="coerce").reset_index(drop=True)
+            return bool(da.equals(db))
+        return True
+    except Exception:
+        return False
 
-    df = base["df"].reset_index(drop=True)
+
+def _overlay_signals_on_spec(spec: Dict[str, Any], df: pd.DataFrame, signals: Dict[str, Any]) -> None:
     n = len(df)
-    focus_start = max(0, n - 80)
-    focus_end = n - 1
-
     vwap_r = signals.get("VWAP")
-    if isinstance(vwap_r, dict) and isinstance(vwap_r.get("df"), pd.DataFrame) and len(vwap_r.get("df")) == n:
-        focus_start = min(focus_start, max(0, int(vwap_r.get("cross_idx", n - 1)) - 55))
-    tri_r = signals.get("Üçgen")
-    if isinstance(tri_r, dict) and isinstance(tri_r.get("df"), pd.DataFrame) and len(tri_r.get("df")) == n:
-        upper, lower = tri_r.get("upper") or {}, tri_r.get("lower") or {}
-        focus_start = min(focus_start, max(0, min(int(upper.get("x1", 0)), int(lower.get("x1", 0))) - 8))
-    tl_r = signals.get("Düşen Trend")
-    if isinstance(tl_r, dict) and isinstance(tl_r.get("df"), pd.DataFrame) and len(tl_r.get("df")) == n:
-        ln = tl_r.get("line") or {}
-        focus_start = min(focus_start, max(0, int(ln.get("x1", 0)) - 8))
-    alt_r = signals.get("Alternasyon")
-    if isinstance(alt_r, dict) and isinstance(alt_r.get("df"), pd.DataFrame) and len(alt_r.get("df")) == n:
-        focus_start = min(focus_start, max(0, int(alt_r.get("start_idx", 0)) - 20))
-
-    spec = _base_spec(df, str(base.get("period", "")), focus_start, focus_end, str(base.get("currency", "TRY")))
-
-    if isinstance(vwap_r, dict) and isinstance(vwap_r.get("df"), pd.DataFrame) and len(vwap_r.get("df")) == n:
+    if isinstance(vwap_r, dict) and _same_df_shape(vwap_r.get("df"), df):
         active_lvl = int(vwap_r.get("level", 0) or 0)
         for info in vwap_r.get("chain", []):
             lvl = int(info.get("level", 0) or 0)
@@ -459,7 +442,8 @@ def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] 
         if 0 <= cross_idx < n:
             _add_marker(spec, cross_idx, float(df["Close"].iloc[cross_idx]), "#D99B16", "star")
 
-    if isinstance(tri_r, dict) and isinstance(tri_r.get("df"), pd.DataFrame) and len(tri_r.get("df")) == n:
+    tri_r = signals.get("Üçgen")
+    if isinstance(tri_r, dict) and _same_df_shape(tri_r.get("df"), df):
         upper, lower = tri_r.get("upper") or {}, tri_r.get("lower") or {}
         apex_x = _finite(tri_r.get("apex_x"), n - 1) or n - 1
         draw_to = min(float(apex_x), n - 1 + 8)
@@ -472,7 +456,8 @@ def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] 
         if apy is not None:
             _add_marker(spec, int(round(apex_x)), apy, "#D99B16", "cross")
 
-    if isinstance(tl_r, dict) and isinstance(tl_r.get("df"), pd.DataFrame) and len(tl_r.get("df")) == n:
+    tl_r = signals.get("Düşen Trend")
+    if isinstance(tl_r, dict) and _same_df_shape(tl_r.get("df"), df):
         ln = tl_r.get("line") or {}
         x1 = int(ln.get("x1", 0)); x2 = int(ln.get("x2", 0)); cross = int(tl_r.get("cross_idx", x2))
         s = _finite(ln.get("slope")); b = _finite(ln.get("intercept"))
@@ -482,7 +467,8 @@ def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] 
         if 0 <= cross < n:
             _add_marker(spec, cross, float(df["Close"].iloc[cross]), "#F23645", "triangle")
 
-    if isinstance(alt_r, dict) and isinstance(alt_r.get("df"), pd.DataFrame) and len(alt_r.get("df")) == n:
+    alt_r = signals.get("Alternasyon")
+    if isinstance(alt_r, dict) and _same_df_shape(alt_r.get("df"), df):
         start = int(alt_r.get("start_idx", max(0, n - 10))); end = int(alt_r.get("end_idx", n - 1))
         sub = df.iloc[max(0, start):min(n, end + 1)]
         if not sub.empty:
@@ -491,4 +477,45 @@ def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] 
             pts = [{"i": i, "y": float(df["Close"].iloc[i])} for i in range(max(0, start), min(n, end + 1))]
             _add_line(spec, pts, "#D5A800", 1.7, True)
 
-    _render_lwc_chart(spec, key=key, height=650)
+
+def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] = None) -> None:
+    """Aynı hissedeki tüm bulunan sinyalleri grafik sayfasında gösterir.
+
+    Farklı tarama periyotları aynı mum eksenine zorla bindirilmez; bu teknik olarak
+    hatalı olurdu. Aynı periyottaki sinyaller tek panelde üst üste çizilir, farklı
+    periyotlar ise aynı sayfada ayrı panellerde gösterilir. Masaüstünde iki sütun,
+    mobilde Streamlit/CSS sayesinde tek sütun görünür.
+    """
+    signals = (payload or {}).get("signals") or {}
+    valid = {}
+    for name, item in signals.items():
+        if isinstance(item, dict) and isinstance(item.get("df"), pd.DataFrame) and len(item.get("df")) > 0:
+            valid[name] = item
+    if not valid:
+        st.warning("Birleşik grafiği çizmek için veri bulunamadı.")
+        return
+
+    groups: Dict[str, Dict[str, Any]] = {}
+    for name, item in valid.items():
+        period = str(item.get("period") or "unknown")
+        df = item.get("df").reset_index(drop=True)
+        group_key = period
+        if group_key in groups and not _same_df_shape(groups[group_key]["df"], df):
+            group_key = f"{period}:{name}"
+        groups.setdefault(group_key, {"period": period, "df": df, "signals": {}})
+        groups[group_key]["signals"][name] = item
+
+    ordered = list(groups.values())
+    cols = st.columns(2) if len(ordered) > 1 else [st.container()]
+    for idx, group in enumerate(ordered):
+        holder = cols[idx % 2] if len(ordered) > 1 else cols[0]
+        with holder:
+            names = list(group["signals"].keys())
+            label = " + ".join(names)
+            st.markdown(f"**{group['period']} · {label}**")
+            df = group["df"]
+            n = len(df)
+            focus_start = max(0, n - 80)
+            spec = _base_spec(df, group["period"], focus_start, n - 1, str(next(iter(group["signals"].values())).get("currency", "TRY")))
+            _overlay_signals_on_spec(spec, df, group["signals"])
+            _render_lwc_chart(spec, key=f"{key or 'combo'}_{idx}", height=470 if len(ordered) > 1 else 650)
