@@ -44,23 +44,48 @@ def _env_bool(name: str, default: bool) -> bool:
 
 def load_auto_settings() -> dict:
     cfg = _read_json(AUTO_SETTINGS, {})
-    if os.getenv("SCAN_TIMES", "").strip():
-        cfg["times"] = [x.strip() for x in os.getenv("SCAN_TIMES", "").split(",") if x.strip()]
-    if os.getenv("AUTO_SCAN_ENABLED", "").strip():
-        cfg["enabled"] = _env_bool("AUTO_SCAN_ENABLED", bool(cfg.get("enabled", True)))
-    if os.getenv("AUTO_MIN_SCORE", "").strip():
-        cfg["min_score"] = float(os.getenv("AUTO_MIN_SCORE"))
-    if os.getenv("AUTO_MIN_SIGNALS", "").strip():
-        cfg["min_signal_count"] = int(os.getenv("AUTO_MIN_SIGNALS"))
-    if os.getenv("AUTO_SCAN_MODE", "").strip():
-        cfg["scan_mode"] = os.getenv("AUTO_SCAN_MODE").strip()
-    if os.getenv("APP_URL", "").strip():
+
+    # V6.1: Site tarafından GitHub Actions repository variable içine yazılan tek merkez ayar.
+    # Bu varsa eski tek tek Variables değerlerinden daha yüksek önceliklidir.
+    remote_raw = os.getenv("AUTO_SCAN_CONFIG_JSON", "").strip()
+    remote_loaded = False
+    if remote_raw:
+        try:
+            remote = json.loads(remote_raw)
+            if isinstance(remote, dict):
+                cfg.update(remote)
+                remote_loaded = True
+        except Exception as exc:
+            print(f"AUTO_SCAN_CONFIG_JSON okunamadı: {exc}", file=sys.stderr)
+
+    # Geriye uyumluluk: merkezi JSON henüz kurulmadıysa eski repository variables çalışmaya devam eder.
+    if not remote_loaded:
+        if os.getenv("SCAN_TIMES", "").strip():
+            cfg["times"] = [x.strip() for x in os.getenv("SCAN_TIMES", "").split(",") if x.strip()]
+        if os.getenv("AUTO_SCAN_ENABLED", "").strip():
+            cfg["enabled"] = _env_bool("AUTO_SCAN_ENABLED", bool(cfg.get("enabled", True)))
+        if os.getenv("AUTO_MIN_SCORE", "").strip():
+            cfg["min_score"] = float(os.getenv("AUTO_MIN_SCORE"))
+        if os.getenv("AUTO_MIN_SIGNALS", "").strip():
+            cfg["min_signal_count"] = int(os.getenv("AUTO_MIN_SIGNALS"))
+        if os.getenv("AUTO_SCAN_MODE", "").strip():
+            cfg["scan_mode"] = os.getenv("AUTO_SCAN_MODE").strip()
+
+    if os.getenv("APP_URL", "").strip() and not str(cfg.get("app_url") or "").strip():
         cfg["app_url"] = os.getenv("APP_URL").strip()
     return cfg
 
 
-def load_app_settings() -> dict:
-    return _read_json(APP_SETTINGS, {})
+def load_app_settings(auto_cfg: dict | None = None) -> dict:
+    cfg = _read_json(APP_SETTINGS, {})
+    remote_scanner = (auto_cfg or {}).get("scanner_settings")
+    if isinstance(remote_scanner, dict):
+        cfg.update(remote_scanner)
+    # Otomatik tarama varsayılan olarak tüm BIST listesini tarar. Kullanıcı özellikle
+    # site listesini seçerse son sembol listesi merkezi ayardan gelir.
+    if not bool((auto_cfg or {}).get("use_site_symbol_list", False)):
+        cfg["son_semboller_text"] = ""
+    return cfg
 
 
 def load_symbols(app_cfg: dict):
@@ -147,11 +172,13 @@ def _sym(row):
     return str((row or {}).get("symbol") or "").replace(".IS", "").upper()
 
 
-def run_all_scans(symbols, app_cfg: dict, scan_mode: str):
-    if scan_mode in PHASES:
-        phases = [scan_mode]
-    else:
-        phases = PHASES
+def run_all_scans(symbols, app_cfg: dict, scan_mode: str, phases_cfg=None):
+    phases = [p for p in list(phases_cfg or []) if p in PHASES]
+    if not phases:
+        if scan_mode in PHASES:
+            phases = [scan_mode]
+        else:
+            phases = list(PHASES)
     results = {}
     errors = {}
     total = len(symbols)
@@ -299,13 +326,13 @@ def main():
     else:
         print("Manuel/force tarama başlatılıyor.")
 
-    app_cfg = load_app_settings()
+    app_cfg = load_app_settings(auto_cfg)
     symbols = load_symbols(app_cfg)
     if not symbols:
         raise RuntimeError("Taranacak hisse listesi boş.")
 
     scan_mode = str(auto_cfg.get("scan_mode") or "Tümünü Tara")
-    results, errors = run_all_scans(symbols, app_cfg, scan_mode)
+    results, errors = run_all_scans(symbols, app_cfg, scan_mode, auto_cfg.get("phases"))
     candidates = combine(results)
     min_score = float(auto_cfg.get("min_score", 70))
     min_signals = int(auto_cfg.get("min_signal_count", 1))

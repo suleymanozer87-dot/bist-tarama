@@ -1,0 +1,73 @@
+name: BIST Otomatik Tarama
+
+on:
+  schedule:
+    # Türkiye saati 10:00-18:00 aralığında 5 dakikada bir sadece SAAT KONTROLÜ yapar.
+    # Gerçek tarama auto_scan_settings.json / SCAN_TIMES saatlerinde çalışır.
+    - cron: '*/5 7-15 * * 1-5'
+  workflow_dispatch:
+
+concurrency:
+  group: bist-auto-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: read
+
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v4
+
+      - name: Python kur
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Önceki bildirim durumunu geri yükle
+        uses: actions/cache/restore@v4
+        with:
+          path: .auto_scan_state.json
+          key: autoscan-state-${{ github.run_id }}
+          restore-keys: |
+            autoscan-state-
+
+      - name: Durum dosyasını hazırla
+        shell: bash
+        run: |
+          if [ ! -f .auto_scan_state.json ]; then
+            echo '{"executed_slots":{},"sent_fingerprints":{}}' > .auto_scan_state.json
+          fi
+
+      - name: Paketleri kur
+        run: pip install -r requirements.txt
+
+      - name: Otomatik taramayı çalıştır
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SCAN_TIMES: ${{ vars.SCAN_TIMES }}
+          AUTO_SCAN_ENABLED: ${{ vars.AUTO_SCAN_ENABLED }}
+          AUTO_MIN_SCORE: ${{ vars.AUTO_MIN_SCORE }}
+          AUTO_MIN_SIGNALS: ${{ vars.AUTO_MIN_SIGNALS }}
+          AUTO_SCAN_MODE: ${{ vars.AUTO_SCAN_MODE }}
+          APP_URL: ${{ vars.APP_URL }}
+          AUTO_SCAN_CONFIG_JSON: ${{ vars.AUTO_SCAN_CONFIG_JSON }}
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python auto_scan.py --force
+          else
+            python auto_scan.py --scheduled
+          fi
+
+      - name: Bildirim durumunu kaydet
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .auto_scan_state.json
+          key: autoscan-state-${{ github.run_id }}

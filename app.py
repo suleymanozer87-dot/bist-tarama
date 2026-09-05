@@ -53,6 +53,15 @@ from chart_helpers import (
     render_vwap_chart,
 )
 from scan_jobs import get_scan_job_manager
+from github_auto_settings import (
+    DEFAULT_OWNER as GITHUB_DEFAULT_OWNER,
+    DEFAULT_REPO as GITHUB_DEFAULT_REPO,
+    VARIABLE_NAME as AUTO_CONFIG_VARIABLE,
+    decode_config as decode_auto_config,
+    encode_config as encode_auto_config,
+    get_repo_variable as github_get_repo_variable,
+    upsert_repo_variable as github_upsert_repo_variable,
+)
 
 # Yukarıdaki koşullu import ifadesi yalnız eski sabit adıyla uyumluluk için yazılmıştır;
 # Python import listesinde koşul kullanılamaz. Bu satır dosya oluşturulurken aşağıda temizlenir.
@@ -189,6 +198,7 @@ a.decision-card:hover { border-color:#0a84ff; box-shadow:0 5px 16px rgba(10,132,
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SETTINGS_PATH = os.path.join(BASE_DIR, ".vwap_ayarlar.json")
 BIST_LIST_PATH = os.path.join(BASE_DIR, "bist_list.txt")
+AUTO_SETTINGS_PATH = os.path.join(BASE_DIR, "auto_scan_settings.json")
 
 CURRENCY_LABELS = {
     "TRY": "TL",
@@ -275,6 +285,255 @@ def save_partial_settings_if_changed(updates):
     changed = any(cfg.get(k) != v for k, v in (updates or {}).items())
     if changed:
         save_partial_settings(updates)
+
+
+
+AUTO_SCANNER_SETTING_KEYS = (
+    "period", "currency", "lookback", "max_workers", "use_cache",
+    "sideways_enabled", "sideways_method", "sideways_months_list", "sideways_min_windows",
+    "sideways_range_pct", "sideways_atr_pct", "drawdown_enabled", "drawdown_min_pct",
+    "alt_scan_period", "alt_scan_min_chain", "alt_scan_min_score",
+    "tl_scan_period", "tl_scan_pivot_window", "tl_scan_min_span_bars", "tl_scan_lookback_bars",
+    "tl_scan_breakout_lookback", "tl_scan_touch_tolerance_pct", "tl_scan_require_volume",
+    "tl_scan_min_touches", "tl_scan_volume_factor",
+    "tri_scan_period", "tri_scan_pivot_window", "tri_scan_min_span_bars", "tri_scan_lookback_bars",
+    "tri_scan_min_apex_bars_ahead", "tri_scan_max_apex_bars_ahead", "tri_scan_max_squeeze_pct",
+)
+
+
+def _read_local_auto_defaults():
+    try:
+        with open(AUTO_SETTINGS_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {
+            "enabled": True, "timezone": "Europe/Istanbul", "weekdays": [0, 1, 2, 3, 4],
+            "times": ["10:05", "10:30", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "17:45"],
+            "grace_minutes": 9, "phases": ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"],
+            "min_score": 70, "min_signal_count": 1, "priority_signal_count": 2,
+            "max_messages_per_run": 20, "send_summary_when_empty": False, "dedupe_days": 14,
+            "link_site_scanner_settings": True, "use_site_symbol_list": False, "scanner_settings": {},
+        }
+
+
+def _secret_value(name, default=""):
+    try:
+        value = st.secrets.get(name, default)
+        if value not in (None, ""):
+            return str(value)
+    except Exception:
+        pass
+    return str(os.getenv(name, default) or "")
+
+
+def github_settings_connection():
+    return {
+        "token": _secret_value("GITHUB_SETTINGS_TOKEN"),
+        "owner": _secret_value("GITHUB_REPO_OWNER", GITHUB_DEFAULT_OWNER),
+        "repo": _secret_value("GITHUB_REPO_NAME", GITHUB_DEFAULT_REPO),
+    }
+
+
+def extract_auto_scanner_settings(site_cfg=None, include_symbols=False):
+    cfg = site_cfg or load_settings()
+    out = {k: copy.deepcopy(cfg.get(k)) for k in AUTO_SCANNER_SETTING_KEYS if k in cfg}
+    if include_symbols:
+        out["son_semboller_text"] = str(cfg.get("son_semboller_text") or "")
+    return out
+
+
+def load_remote_auto_config(force=False):
+    if not force and isinstance(st.session_state.get("_remote_auto_config"), dict):
+        return copy.deepcopy(st.session_state["_remote_auto_config"]), st.session_state.get("_remote_auto_error")
+    base = _read_local_auto_defaults()
+    conn = github_settings_connection()
+    if not conn["token"]:
+        err = "Streamlit Secrets içinde GITHUB_SETTINGS_TOKEN henüz tanımlı değil."
+        st.session_state["_remote_auto_config"] = copy.deepcopy(base)
+        st.session_state["_remote_auto_error"] = err
+        return base, err
+    raw, err = github_get_repo_variable(conn["token"], owner=conn["owner"], repo=conn["repo"], name=AUTO_CONFIG_VARIABLE)
+    if err:
+        st.session_state["_remote_auto_config"] = copy.deepcopy(base)
+        st.session_state["_remote_auto_error"] = err
+        return base, err
+    remote = decode_auto_config(raw)
+    if remote:
+        base.update(remote)
+    st.session_state["_remote_auto_config"] = copy.deepcopy(base)
+    st.session_state["_remote_auto_error"] = None
+    return base, None
+
+
+def save_remote_auto_config(cfg):
+    conn = github_settings_connection()
+    if not conn["token"]:
+        return False, "GITHUB_SETTINGS_TOKEN tanımlı değil."
+    ok, err = github_upsert_repo_variable(
+        conn["token"], encode_auto_config(cfg), owner=conn["owner"], repo=conn["repo"], name=AUTO_CONFIG_VARIABLE
+    )
+    if ok:
+        st.session_state["_remote_auto_config"] = copy.deepcopy(cfg)
+        st.session_state["_remote_auto_error"] = None
+    return ok, err
+
+
+def hydrate_site_scanner_settings_from_remote():
+    """Yeni Streamlit oturumunda merkezi otomatik tarama ayarlarını siteye geri taşır."""
+    if st.session_state.get("_auto_remote_hydrated"):
+        return
+    st.session_state["_auto_remote_hydrated"] = True
+    cfg, err = load_remote_auto_config(force=True)
+    if err or not bool(cfg.get("link_site_scanner_settings", True)):
+        return
+    remote_scanner = cfg.get("scanner_settings") or {}
+    if isinstance(remote_scanner, dict) and remote_scanner:
+        save_partial_settings_if_changed({k: copy.deepcopy(v) for k, v in remote_scanner.items() if k in AUTO_SCANNER_SETTING_KEYS})
+        if bool(cfg.get("use_site_symbol_list", False)) and "son_semboller_text" in remote_scanner:
+            save_partial_settings_if_changed({"son_semboller_text": str(remote_scanner.get("son_semboller_text") or "")})
+
+
+def sync_linked_auto_scanner_settings(site_cfg=None, quiet=True):
+    remote, err = load_remote_auto_config(force=False)
+    if err or not bool(remote.get("link_site_scanner_settings", True)):
+        return False, err
+    include_symbols = bool(remote.get("use_site_symbol_list", False))
+    desired = extract_auto_scanner_settings(site_cfg or load_settings(), include_symbols=include_symbols)
+    if remote.get("scanner_settings") == desired:
+        return True, None
+    remote["scanner_settings"] = desired
+    ok, save_err = save_remote_auto_config(remote)
+    if not ok and not quiet:
+        st.error(save_err or "Otomatik tarama ayarları GitHub'a kaydedilemedi.")
+    return ok, save_err
+
+
+def _parse_times_text(text):
+    out = []
+    bad = []
+    for raw in str(text or "").replace(";", ",").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            hh, mm = [int(x) for x in raw.split(":", 1)]
+            if not (0 <= hh <= 23 and 0 <= mm <= 59):
+                raise ValueError
+            val = f"{hh:02d}:{mm:02d}"
+            if val not in out:
+                out.append(val)
+        except Exception:
+            bad.append(raw)
+    return out, bad
+
+
+def render_auto_scan_settings_panel():
+    remote, remote_err = load_remote_auto_config(force=False)
+    conn = github_settings_connection()
+    connected = bool(conn.get("token")) and not remote_err
+
+    with st.expander("🤖 Otomatik Tarama ve Telegram", expanded=False):
+        if connected:
+            st.success("GitHub otomatik tarama ayarlarına bağlı. Burada kaydettiğin değerler bir sonraki otomatik taramada kullanılır.")
+        else:
+            st.warning("GitHub ayar bağlantısı henüz tamamlanmadı. Önce Streamlit Secrets'a GITHUB_SETTINGS_TOKEN eklemeliyiz.")
+            if remote_err:
+                st.caption(remote_err)
+
+        enabled = st.checkbox("Otomatik tarama aktif", value=bool(remote.get("enabled", True)), key="auto_enabled")
+        link_site = st.checkbox(
+            "Normal tarama ayarlarını otomatik taramada da kullan",
+            value=bool(remote.get("link_site_scanner_settings", True)), key="auto_link_site",
+            help="Açıksa VWAP, Üçgen, Düşen Trend ve Alternasyon ayarlarını sitede değiştirdiğinde GitHub otomatik taraması da aynı ayarları kullanır.",
+        )
+        use_site_symbols = st.checkbox(
+            "Sitedeki hisse listesini de kullan",
+            value=bool(remote.get("use_site_symbol_list", False)), key="auto_use_site_symbols",
+            help="Kapalı kalırsa otomatik tarama bist_list.txt içindeki tüm listeyi tarar.",
+        )
+
+        phases_default = [p for p in remote.get("phases", ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]) if p in ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]]
+        phases = st.multiselect(
+            "Otomatik çalışacak taramalar",
+            ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"], default=phases_default,
+            key="auto_phases",
+        )
+        times_text = st.text_input(
+            "Tarama saatleri (Türkiye saati)",
+            value=",".join(remote.get("times") or []),
+            placeholder="10:05,10:30,11:00,12:00,13:00,14:00,15:00,16:00,17:00,17:45",
+            key="auto_times_text",
+        )
+        times, bad_times = _parse_times_text(times_text)
+        if bad_times:
+            st.error("Geçersiz saat: " + ", ".join(bad_times))
+
+        a1, a2 = st.columns(2)
+        with a1:
+            min_score = st.slider("Telegram min. yükseliş puanı", 0, 100, int(float(remote.get("min_score", 70))), 5, key="auto_min_score")
+            min_signals = st.slider("Telegram min. sinyal sayısı", 1, 4, int(remote.get("min_signal_count", 1)), key="auto_min_signals")
+        with a2:
+            priority = st.slider("Güçlü bildirim için sinyal", 1, 4, int(remote.get("priority_signal_count", 2)), key="auto_priority")
+            max_messages = st.slider("Bir taramada maks. Telegram mesajı", 1, 50, int(remote.get("max_messages_per_run", 20)), key="auto_max_messages")
+        b1, b2 = st.columns(2)
+        with b1:
+            dedupe_days = st.slider("Aynı sinyali tekrar göndermeme (gün)", 1, 60, int(remote.get("dedupe_days", 14)), key="auto_dedupe_days")
+        with b2:
+            summary_empty = st.checkbox("Sinyal yoksa da özet gönder", value=bool(remote.get("send_summary_when_empty", False)), key="auto_empty_summary")
+
+        if link_site:
+            current = load_settings()
+            st.caption(
+                "Bağlı tarama ayarları: "
+                f"VWAP {PERIOD_LABELS.get(current.get('period'), current.get('period'))} · "
+                f"Üçgen {TRIANGLE_SCAN_PERIOD_LABELS.get(current.get('tri_scan_period'), current.get('tri_scan_period'))} · "
+                f"Trend {TRENDLINE_SCAN_PERIOD_LABELS.get(current.get('tl_scan_period'), current.get('tl_scan_period'))} · "
+                f"Alternasyon {ALTERNATION_SCAN_PERIOD_LABELS.get(current.get('alt_scan_period'), current.get('alt_scan_period'))}"
+            )
+
+        save_disabled = bool(bad_times) or not times or not phases or not connected
+        if st.button("Otomatik Tarama Ayarlarını Kaydet", type="primary", width="stretch", disabled=save_disabled, key="auto_save_settings"):
+            new_cfg = copy.deepcopy(remote)
+            new_cfg.update({
+                "enabled": bool(enabled),
+                "timezone": "Europe/Istanbul",
+                "weekdays": [0, 1, 2, 3, 4],
+                "times": times,
+                "phases": phases,
+                "scan_mode": "Tümünü Tara" if len(phases) > 1 else phases[0],
+                "min_score": int(min_score),
+                "min_signal_count": int(min_signals),
+                "priority_signal_count": int(priority),
+                "max_messages_per_run": int(max_messages),
+                "send_summary_when_empty": bool(summary_empty),
+                "dedupe_days": int(dedupe_days),
+                "link_site_scanner_settings": bool(link_site),
+                "use_site_symbol_list": bool(use_site_symbols),
+            })
+            if link_site:
+                new_cfg["scanner_settings"] = extract_auto_scanner_settings(load_settings(), include_symbols=use_site_symbols)
+            ok, err = save_remote_auto_config(new_cfg)
+            if ok:
+                st.success("Kaydedildi. Bir sonraki GitHub Actions taraması bu ayarlarla çalışacak.")
+            else:
+                st.error(err or "Ayarlar kaydedilemedi.")
+
+        st.markdown("---")
+        reset_confirm = st.checkbox("Otomatik tarama ayarlarını varsayılana döndürmeyi onaylıyorum", key="auto_reset_confirm")
+        if st.button("Otomatik Tarama Ayarlarını Sıfırla", width="stretch", disabled=(not reset_confirm or not connected), key="auto_reset_button"):
+            defaults = _read_local_auto_defaults()
+            if bool(defaults.get("link_site_scanner_settings", True)):
+                defaults["scanner_settings"] = extract_auto_scanner_settings(load_settings(), include_symbols=bool(defaults.get("use_site_symbol_list", False)))
+            ok, err = save_remote_auto_config(defaults)
+            if ok:
+                for k in list(st.session_state.keys()):
+                    if str(k).startswith("auto_"):
+                        st.session_state.pop(k, None)
+                st.success("Otomatik tarama ayarları varsayılana döndürüldü.")
+                st.rerun()
+            else:
+                st.error(err or "Sıfırlama başarısız.")
 
 
 def get_result_pref(view, key, default=None):
@@ -1879,7 +2138,11 @@ def render_scan_page():
         if st.button(f"🚀 Dördünü Tara · {len(symbols)} hisse", type="primary", width="stretch"):
             launch_background_scan("Tümünü Tara", symbols, cfg, result_focus="Karar Tablosu")
 
+    # Normal tarama ayarları bağlıysa değişiklikleri merkezi GitHub variable'a sessizce eşitle.
+    sync_linked_auto_scanner_settings(load_settings(), quiet=True)
+
     st.markdown("---")
+    render_auto_scan_settings_panel()
     with st.expander("⚙️ Ayar Yönetimi", expanded=False):
         st.caption("Tarama ayarları ve Sonuçlar ekranındaki filtre/sıralamalar otomatik kaydedilir.")
         confirm_key = "reset_settings_confirm"
@@ -1892,6 +2155,7 @@ def render_scan_page():
 # -----------------------------------------------------------------------------
 # Üst navigasyon ve uygulama yönlendirmesi
 # -----------------------------------------------------------------------------
+hydrate_site_scanner_settings_from_remote()
 _startup_cfg = load_settings()
 st.session_state.setdefault("_app_page", "Ana Sayfa")
 st.session_state.setdefault("_scan_type", _startup_cfg.get("last_scan_type", "VWAP"))
