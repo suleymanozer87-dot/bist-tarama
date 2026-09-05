@@ -413,3 +413,82 @@ def render_alternation_chart(sym: str, r: Dict[str, Any], key: Optional[str] = N
         pts=[{"i":i,"y":float(df["Close"].iloc[i])} for i in range(max(0,start),min(n,end+1))]
         _add_line(spec,pts,"#D5A800",1.7,True)
     _render_lwc_chart(spec,key=key,height=650)
+
+
+def render_combined_chart(sym: str, payload: Dict[str, Any], key: Optional[str] = None) -> None:
+    signals = (payload or {}).get("signals") or {}
+    base = None
+    for name in ("VWAP", "Üçgen", "Düşen Trend", "Alternasyon"):
+        item = signals.get(name)
+        if isinstance(item, dict) and isinstance(item.get("df"), pd.DataFrame) and len(item.get("df")) > 0:
+            base = item
+            break
+    if not base:
+        import streamlit as st
+        st.warning("Birleşik grafiği çizmek için veri bulunamadı.")
+        return
+
+    df = base["df"].reset_index(drop=True)
+    n = len(df)
+    focus_start = max(0, n - 80)
+    focus_end = n - 1
+
+    vwap_r = signals.get("VWAP")
+    if isinstance(vwap_r, dict) and isinstance(vwap_r.get("df"), pd.DataFrame) and len(vwap_r.get("df")) == n:
+        focus_start = min(focus_start, max(0, int(vwap_r.get("cross_idx", n - 1)) - 55))
+    tri_r = signals.get("Üçgen")
+    if isinstance(tri_r, dict) and isinstance(tri_r.get("df"), pd.DataFrame) and len(tri_r.get("df")) == n:
+        upper, lower = tri_r.get("upper") or {}, tri_r.get("lower") or {}
+        focus_start = min(focus_start, max(0, min(int(upper.get("x1", 0)), int(lower.get("x1", 0))) - 8))
+    tl_r = signals.get("Düşen Trend")
+    if isinstance(tl_r, dict) and isinstance(tl_r.get("df"), pd.DataFrame) and len(tl_r.get("df")) == n:
+        ln = tl_r.get("line") or {}
+        focus_start = min(focus_start, max(0, int(ln.get("x1", 0)) - 8))
+    alt_r = signals.get("Alternasyon")
+    if isinstance(alt_r, dict) and isinstance(alt_r.get("df"), pd.DataFrame) and len(alt_r.get("df")) == n:
+        focus_start = min(focus_start, max(0, int(alt_r.get("start_idx", 0)) - 20))
+
+    spec = _base_spec(df, str(base.get("period", "")), focus_start, focus_end, str(base.get("currency", "TRY")))
+
+    if isinstance(vwap_r, dict) and isinstance(vwap_r.get("df"), pd.DataFrame) and len(vwap_r.get("df")) == n:
+        active_lvl = int(vwap_r.get("level", 0) or 0)
+        for info in vwap_r.get("chain", []):
+            lvl = int(info.get("level", 0) or 0)
+            _add_line(spec, _series_points(info.get("vwap")), VWAP_COLORS.get(lvl, "#7b8492"), 2.0, dashed=(lvl != active_lvl))
+        cross_idx = int(vwap_r.get("cross_idx", max(0, n - 1)))
+        if 0 <= cross_idx < n:
+            _add_marker(spec, cross_idx, float(df["Close"].iloc[cross_idx]), "#D99B16", "star")
+
+    if isinstance(tri_r, dict) and isinstance(tri_r.get("df"), pd.DataFrame) and len(tri_r.get("df")) == n:
+        upper, lower = tri_r.get("upper") or {}, tri_r.get("lower") or {}
+        apex_x = _finite(tri_r.get("apex_x"), n - 1) or n - 1
+        draw_to = min(float(apex_x), n - 1 + 8)
+        for ln, col in ((upper, "#F23645"), (lower, "#089981")):
+            s = _finite(ln.get("slope")); b = _finite(ln.get("intercept")); x1 = int(ln.get("x1", 0)); x2 = int(ln.get("x2", 0))
+            if s is not None and b is not None:
+                _add_line(spec, [{"i": x1, "y": s * x1 + b}, {"i": x2, "y": s * x2 + b}], col, 2.4, False)
+                _add_line(spec, [{"i": x2, "y": s * x2 + b}, {"i": draw_to, "y": s * draw_to + b}], col, 1.8, True)
+        apy = _finite(tri_r.get("apex_y"))
+        if apy is not None:
+            _add_marker(spec, int(round(apex_x)), apy, "#D99B16", "cross")
+
+    if isinstance(tl_r, dict) and isinstance(tl_r.get("df"), pd.DataFrame) and len(tl_r.get("df")) == n:
+        ln = tl_r.get("line") or {}
+        x1 = int(ln.get("x1", 0)); x2 = int(ln.get("x2", 0)); cross = int(tl_r.get("cross_idx", x2))
+        s = _finite(ln.get("slope")); b = _finite(ln.get("intercept"))
+        if s is not None and b is not None:
+            _add_line(spec, [{"i": x1, "y": s * x1 + b}, {"i": x2, "y": s * x2 + b}], "#F23645", 2.5, False)
+            _add_line(spec, [{"i": x2, "y": s * x2 + b}, {"i": cross, "y": s * cross + b}], "#F23645", 1.8, True)
+        if 0 <= cross < n:
+            _add_marker(spec, cross, float(df["Close"].iloc[cross]), "#F23645", "triangle")
+
+    if isinstance(alt_r, dict) and isinstance(alt_r.get("df"), pd.DataFrame) and len(alt_r.get("df")) == n:
+        start = int(alt_r.get("start_idx", max(0, n - 10))); end = int(alt_r.get("end_idx", n - 1))
+        sub = df.iloc[max(0, start):min(n, end + 1)]
+        if not sub.empty:
+            lo = float(sub["Low"].min()); hi = float(sub["High"].max()); pad = max((hi - lo) * .06, abs(hi) * .004, .01)
+            spec["rects"].append({"x0": start - .5, "x1": end + .5, "y0": lo - pad, "y1": hi + pad, "color": "#D5A800", "fill": "rgba(245,197,66,.04)", "dashed": True})
+            pts = [{"i": i, "y": float(df["Close"].iloc[i])} for i in range(max(0, start), min(n, end + 1))]
+            _add_line(spec, pts, "#D5A800", 1.7, True)
+
+    _render_lwc_chart(spec, key=key, height=650)

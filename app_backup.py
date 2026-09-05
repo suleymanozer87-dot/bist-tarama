@@ -5,7 +5,6 @@ import ast
 import json
 import os
 import sys
-import html
 from datetime import datetime
 
 import pandas as pd
@@ -46,7 +45,6 @@ from vwap_core import (
 )
 from chart_helpers import (
     render_alternation_chart,
-    render_combined_chart,
     render_triangle_chart,
     render_trendline_chart,
     render_vwap_chart,
@@ -306,139 +304,6 @@ def format_drawdown_value(row):
         return val
 
 
-def build_combined_chart_payload(symbol, signal_map):
-    payload = {"symbol": str(symbol or "—"), "signals": {}}
-    for name in ("VWAP", "Üçgen", "Düşen Trend", "Alternasyon"):
-        item = (signal_map or {}).get(name)
-        if isinstance(item, dict):
-            payload["signals"][name] = item
-    return payload
-
-
-def collect_signal_results_for_symbol(sets, symbol):
-    sym = str(symbol or "").replace(".IS", "").upper()
-    out = {}
-    for name in ("VWAP", "Üçgen", "Düşen Trend", "Alternasyon"):
-        for r in list((sets or {}).get(name) or []):
-            rs = str((r or {}).get("symbol") or "").replace(".IS", "").upper()
-            if rs == sym:
-                out[name] = r
-                break
-    return out
-
-
-def _safe_num(v, default=0.0):
-    try:
-        return float(v)
-    except Exception:
-        return default
-
-
-def _fmt_cell(v):
-    if v is None:
-        return "—"
-    if isinstance(v, float):
-        if abs(v - round(v)) < 1e-9:
-            return str(int(round(v)))
-        return f"{v:.1f}"
-    s = str(v).strip()
-    return s if s else "—"
-
-
-def render_compact_table(df, header_map=None, note=None, key_prefix="table"):
-    if df is None or df.empty:
-        st.warning("Gösterilecek veri yok.")
-        return
-    header_map = header_map or {}
-    cols = list(df.columns)
-    thead = "".join(f"<th>{html.escape(str(header_map.get(c, c)))}</th>" for c in cols)
-    body_rows = []
-    for _, row in df.iterrows():
-        tds = []
-        for c in cols:
-            val = _fmt_cell(row.get(c))
-            tds.append(f"<td>{html.escape(val)}</td>")
-        body_rows.append("<tr>" + "".join(tds) + "</tr>")
-    note_html = f'<div class="compact-result-note">{html.escape(str(note))}</div>' if note else ''
-    table_html = '<div class="compact-result-wrap">' + note_html + '<table class="compact-result-table"><thead><tr>' + thead + '</tr></thead><tbody>' + ''.join(body_rows) + '</tbody></table></div>'
-    st.markdown(table_html, unsafe_allow_html=True)
-
-
-def sort_combined_rows(rows, mode):
-    rows = list(rows or [])
-    if mode == "Sinyal Sayısı ↓":
-        rows.sort(key=lambda r: (int(r.get("Sinyal Sayısı") or 0), _safe_num(r.get("En Yüksek Puan")), _safe_num(r.get("Ortalama Puan"))), reverse=True)
-    elif mode == "En Yüksek Puan ↓":
-        rows.sort(key=lambda r: (_safe_num(r.get("En Yüksek Puan")), int(r.get("Sinyal Sayısı") or 0)), reverse=True)
-    elif mode == "Ortalama Puan ↓":
-        rows.sort(key=lambda r: (_safe_num(r.get("Ortalama Puan")), _safe_num(r.get("En Yüksek Puan"))), reverse=True)
-    elif mode == "RSI 14 ↓":
-        rows.sort(key=lambda r: (_safe_num(r.get("RSI 14")), _safe_num(r.get("En Yüksek Puan"))), reverse=True)
-    elif mode == "Hacim Oranı ↓":
-        rows.sort(key=lambda r: (_safe_num(r.get("Hacim Oranı")), _safe_num(r.get("En Yüksek Puan"))), reverse=True)
-    elif mode == "ATH / Anchor Düşüş ↓":
-        rows.sort(key=lambda r: (_safe_num(r.get("ATH'den Düşüş %")), _safe_num(r.get("En Yüksek Puan"))), reverse=True)
-    else:
-        rows.sort(key=lambda r: str(r.get("Sembol") or ""))
-    return rows
-
-
-def sort_view_rows(view, rows, mode):
-    rows = list(rows or [])
-    if mode == "Sembol A-Z":
-        rows.sort(key=lambda r: str((r or {}).get("symbol") or ""))
-        return rows
-    if view == "VWAP":
-        if mode == "VWAP Seviyesi ↓":
-            rows.sort(key=lambda r: (int((r or {}).get("level") or 0), q_score(r)), reverse=True)
-        elif mode == "Bar Önce ↑":
-            rows.sort(key=lambda r: (int((r or {}).get("bars_ago") or 999999), -q_score(r)))
-        elif mode == "ATH / Anchor Düşüş ↓":
-            rows.sort(key=lambda r: _safe_num(format_drawdown_value(r)), reverse=True)
-        else:
-            rows.sort(key=q_score, reverse=True)
-    elif view == "Üçgen":
-        if mode == "Sıkışma % ↑":
-            rows.sort(key=lambda r: (_safe_num((r or {}).get("squeeze_pct"), 999999), -q_score(r)))
-        else:
-            rows.sort(key=q_score, reverse=True)
-    elif view == "Düşen Trend":
-        if mode == "Temas ↓":
-            rows.sort(key=lambda r: (int((r or {}).get("touches") or 0), q_score(r)), reverse=True)
-        elif mode == "Bar Önce ↑":
-            rows.sort(key=lambda r: (int((r or {}).get("bars_ago") or 999999), -q_score(r)))
-        else:
-            rows.sort(key=q_score, reverse=True)
-    elif view == "Alternasyon":
-        if mode == "Desen Puanı ↓":
-            rows.sort(key=lambda r: (_safe_num((r or {}).get("score")), q_score(r)), reverse=True)
-        elif mode == "Zincir ↓":
-            rows.sort(key=lambda r: (int((r or {}).get("chain_length") or 0), q_score(r)), reverse=True)
-        else:
-            rows.sort(key=q_score, reverse=True)
-    else:
-        rows.sort(key=q_score, reverse=True)
-    return rows
-
-
-def chart_choice_label_from_combined(row):
-    return f"{row.get('Sembol', '—')} · {row.get('Teyitler', '—')} · max {row.get('En Yüksek Puan', '—')}"
-
-
-def chart_choice_label_from_result(r, view):
-    sym = str((r or {}).get('symbol') or '—')
-    extra = view
-    if view == 'VWAP':
-        extra = f"{r.get('level', '—')}. VWAP"
-    elif view == 'Üçgen':
-        extra = str(r.get('pattern_type') or 'Üçgen')
-    elif view == 'Düşen Trend':
-        extra = f"Temas {r.get('touches', '—')}"
-    elif view == 'Alternasyon':
-        extra = f"Zincir {r.get('chain_length', '—')}"
-    return f"{sym} · {extra} · puan {round(q_score(r),1)}"
-
-
 def build_combined_analysis(sets):
     """Tüm tarama sonuçlarını sembol bazında tek karar kaydında birleştirir."""
     by_sym = {}
@@ -476,9 +341,6 @@ def build_combined_analysis(sets):
             "Kalite": "—",
             "_chart_view": None,
             "_chart_result": None,
-            "_chart_kind": None,
-            "_chart_payload": None,
-            "_signal_results": {},
         })
 
     # Bağımsız yardımcı sonuçlar — VWAP eşleşmesi olmasa da korunur.
@@ -503,7 +365,6 @@ def build_combined_analysis(sets):
         score = round(q_score(r), 1)
         x["VWAP Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "VWAP", "VWAP", r))
-        x["_signal_results"]["VWAP"] = r
 
     for r in list(sets.get("Üçgen") or []):
         x = rec(r.get("symbol"))
@@ -512,7 +373,6 @@ def build_combined_analysis(sets):
         score = round(q_score(r), 1)
         x["Üçgen Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "Üçgen", "Üçgen", r))
-        x["_signal_results"]["Üçgen"] = r
 
     for r in list(sets.get("Düşen Trend") or []):
         x = rec(r.get("symbol"))
@@ -522,7 +382,6 @@ def build_combined_analysis(sets):
         score = round(q_score(r), 1)
         x["Trend Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "Düşen Trend", "Düşen Trend", r))
-        x["_signal_results"]["Düşen Trend"] = r
 
     for r in list(sets.get("Alternasyon") or []):
         x = rec(r.get("symbol"))
@@ -532,7 +391,6 @@ def build_combined_analysis(sets):
         score = round(q_score(r), 1)
         x["Alternasyon Puan"] = score
         signal_scores.setdefault(x["Sembol"], []).append((score, "Alternasyon", "Alternasyon", r))
-        x["_signal_results"]["Alternasyon"] = r
 
     for sym, x in by_sym.items():
         choices = signal_scores.get(sym) or []
@@ -547,8 +405,6 @@ def build_combined_analysis(sets):
         x["En Güçlü Sinyal"] = best[1]
         x["_chart_view"] = best[2]
         x["_chart_result"] = best[3]
-        x["_chart_kind"] = "combined" if len(x.get("_signal_results") or {}) >= 2 else chart_kind_for(best[2])
-        x["_chart_payload"] = build_combined_chart_payload(sym, x.get("_signal_results") or {})
         q = (best[3] or {}).get("quality") or {}
         x["RSI 14"] = q.get("rsi14") if q.get("rsi14") is not None else "—"
         x["Dirence Alan %"] = q.get("resistance_room_pct") if q.get("resistance_room_pct") is not None else "—"
@@ -746,18 +602,13 @@ def render_live_scan_status():
 # Grafik sayfası
 # -----------------------------------------------------------------------------
 def chart_payload_complete(kind, result):
-    if not isinstance(result, dict):
-        return False
-    if kind == "combined":
-        signals = result.get("signals") or {}
-        return any(isinstance((item or {}).get("df"), pd.DataFrame) and len((item or {}).get("df")) > 0 for item in signals.values())
     required = {
         "vwap": ("df", "chain"),
         "alternation": ("df", "start_idx", "end_idx"),
         "trendline": ("df", "line", "cross_idx"),
         "triangle": ("df", "upper", "lower", "apex_x", "apex_y"),
     }.get(kind, ())
-    return bool(required) and all(result.get(k) is not None for k in required)
+    return isinstance(result, dict) and bool(required) and all(result.get(k) is not None for k in required)
 
 
 def repair_chart_payload(kind, sym, result):
@@ -805,8 +656,6 @@ def repair_chart_payload(kind, sym, result):
                 max_apex_bars_ahead=int(cfg.get("tri_scan_max_apex_bars_ahead", 40)),
                 max_squeeze_pct=float(cfg.get("tri_scan_max_squeeze_pct", 50.0)),
             )
-        elif kind == "combined":
-            return result
         else:
             return result
     except Exception as exc:
@@ -878,10 +727,6 @@ def render_chart_page_if_requested():
         "alternation": "Alternasyon",
     }
     # TradingView benzeri sade grafik ekranı: üstte ekstra puan kartı/başlık yok.
-    if kind == "combined":
-        active = list(((result or {}).get("signals") or {}).keys())
-        if active:
-            st.caption("Çizilen sinyaller: " + " + ".join(active))
 
     if not chart_payload_complete(kind, result):
         st.error((result or {}).get("_chart_repair_error") or "Grafik için gerekli veri bulunamadı. İlgili taramayı yeniden çalıştırın.")
@@ -895,8 +740,6 @@ def render_chart_page_if_requested():
             render_trendline_chart(sym, result, key=f"chart_tl_{sym}")
         elif kind == "alternation":
             render_alternation_chart(sym, result, key=f"chart_alt_{sym}")
-        elif kind == "combined":
-            render_combined_chart(sym, result, key=f"chart_combo_{sym}")
     except Exception as exc:
         st.error(f"{sym} grafiği çizilemedi: {exc}")
         st.exception(exc)
@@ -1001,21 +844,20 @@ def render_results_page():
             st.warning("Birleştirilecek sonuç bulunamadı.")
             return
 
+        # Karar ekranı — önce çoklu teyit, sonra puan.
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Hisse", len(combined_rows))
         m2.metric("2+ Sinyal", sum(int(r.get("Sinyal Sayısı") or 0) >= 2 for r in combined_rows))
         m3.metric("70+ Puan", sum(float(r.get("En Yüksek Puan") or 0) >= 70 for r in combined_rows))
         m4.metric("3+ Sinyal", sum(int(r.get("Sinyal Sayısı") or 0) >= 3 for r in combined_rows))
 
-        f1, f2, f3, f4 = st.columns(4)
+        f1, f2, f3 = st.columns(3)
         with f1:
             query = st.text_input("Hisse ara", placeholder="THYAO", key="decision_symbol_search")
         with f2:
             min_signal = st.selectbox("En az sinyal", [1, 2, 3, 4], index=0, key="decision_min_signal")
         with f3:
             min_score = st.selectbox("En az puan", [0, 50, 60, 70, 80], index=0, key="decision_min_score")
-        with f4:
-            sort_mode = st.selectbox("Sırala", ["Sinyal Sayısı ↓", "En Yüksek Puan ↓", "Ortalama Puan ↓", "RSI 14 ↓", "Hacim Oranı ↓", "ATH / Anchor Düşüş ↓", "Sembol A-Z"], index=0, key="decision_sort_mode")
 
         filtered = []
         qtxt = str(query or "").strip().upper()
@@ -1027,66 +869,63 @@ def render_results_page():
             if float(row.get("En Yüksek Puan") or 0) < float(min_score):
                 continue
             filtered.append(row)
-        filtered = sort_combined_rows(filtered, sort_mode)
 
-        main_cols = [
-            "Sembol", "Sinyal Sayısı", "Teyitler", "En Güçlü Sinyal", "En Yüksek Puan",
-            "Ortalama Puan", "VWAP", "ATH'den Düşüş %", "Yataylık", "Üçgen", "Düşen Kırılım",
-            "Alternasyon", "RSI 14", "Hacim Oranı", "Dirence Alan %", "Retest"
+        compact_cols = [
+            "Sembol", "Sinyal Sayısı", "Teyitler", "En Güçlü Sinyal",
+            "En Yüksek Puan", "Ortalama Puan", "VWAP", "ATH'den Düşüş %",
+            "Yataylık", "Üçgen", "Düşen Kırılım", "Alternasyon", "RSI 14",
+            "Dirence Alan %", "Retest",
         ]
-        main_df = pd.DataFrame([{k: r.get(k, "—") for k in main_cols} for r in filtered])
-        render_compact_table(
-            main_df,
-            {
-                "Sinyal Sayısı": "Sinyal", "Teyitler": "Taramalar", "En Güçlü Sinyal": "Güçlü",
-                "En Yüksek Puan": "Max", "Ortalama Puan": "Ort", "ATH'den Düşüş %": "Düşüş %",
-                "Düşen Kırılım": "Trend", "RSI 14": "RSI", "Hacim Oranı": "Hacim", "Dirence Alan %": "Direnç %",
-                "Retest": "RT"
-            },
-            note="Yatay kaydırma olmadan tek bakışta özet görünüm. Tüm teknik alanlar aşağıdaki detay tablosunda da açıkça listelenir.",
-            key_prefix="decision_main"
-        )
-
-        detail_cols = [
-            "Sembol", "Sinyal Sayısı", "Teyitler", "Kalite", "VWAP", "VWAP Kırılım", "VWAP Bar Önce", "VWAP Puan",
-            "ATH'den Düşüş %", "Yataylık", "Üçgen", "Üçgen Sıkışma %", "Üçgen Puan",
-            "Düşen Kırılım", "Trend Temas", "Trend Puan", "Alternasyon", "Alternasyon Desen Puanı",
-            "Alternasyon Puan", "RSI 14", "Dirence Alan %", "Hacim Oranı", "Retest", "Güçlü Teyitler"
-        ]
-        detail_df = pd.DataFrame([{k: r.get(k, "—") for k in detail_cols} for r in filtered])
-        render_compact_table(
-            detail_df,
-            {
-                "Sinyal Sayısı": "Sinyal", "VWAP Kırılım": "VWAP Tar.", "VWAP Bar Önce": "VWAP Bar",
-                "ATH'den Düşüş %": "Düşüş %", "Üçgen Sıkışma %": "Sıkışma %", "Trend Temas": "Temas",
-                "Alternasyon Desen Puanı": "Alt Desen", "Dirence Alan %": "Direnç %", "Hacim Oranı": "Hacim",
-                "Güçlü Teyitler": "Teyit Notu"
-            },
-            note="Detay tablosu — karar verirken gereken bütün teknik alanlar açık görünür.",
-            key_prefix="decision_detail"
-        )
-
-        if filtered:
-            option_map = {chart_choice_label_from_combined(r): r for r in filtered}
-            c1, c2 = st.columns([5, 1])
-            with c1:
-                selected_label = st.selectbox("Grafik açılacak hisse", list(option_map.keys()), key="decision_chart_picker")
-            with c2:
-                st.write("")
-                if st.button("Grafiği Aç", type="primary", key="decision_open_chart", width="stretch"):
-                    row = option_map[selected_label]
-                    if row.get("_chart_kind") == "combined":
-                        open_chart("combined", row.get("Sembol"), row.get("_chart_payload"))
-                    else:
-                        open_chart(chart_kind_for(row.get("_chart_view")), row.get("Sembol"), row.get("_chart_result"))
-
-        st.download_button(
-            "CSV İndir",
-            detail_df.to_csv(index=False).encode("utf-8-sig"),
-            file_name="bist_karar_tablosu.csv",
-            mime="text/csv",
+        decision_df = pd.DataFrame([{k: r.get(k, "—") for k in compact_cols} for r in filtered])
+        nonce = int(st.session_state.get("_result_table_nonce", 0))
+        event = st.dataframe(
+            decision_df,
             width="stretch",
+            hide_index=True,
+            height=min(700, 82 + 36 * max(1, len(decision_df))),
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"decision_table_{nonce}",
         )
+        selected_rows = []
+        try:
+            selected_rows = list(event.selection.rows)
+        except Exception:
+            try:
+                selected_rows = list((event or {}).get("selection", {}).get("rows", []))
+            except Exception:
+                selected_rows = []
+        if selected_rows:
+            idx2 = int(selected_rows[0])
+            if 0 <= idx2 < len(filtered):
+                row = filtered[idx2]
+                result = row.get("_chart_result")
+                chart_view = row.get("_chart_view")
+                if result and chart_view:
+                    st.session_state["_result_table_nonce"] = nonce + 1
+                    st.session_state["_results_focus"] = "Karar Tablosu"
+                    open_chart(chart_kind_for(chart_view), row.get("Sembol"), result)
+
+        with st.expander("Tüm Teknik Veriler", expanded=False):
+            detail_cols = [
+                "Sembol", "Sinyal Sayısı", "Teyitler", "En Güçlü Sinyal", "Kalite",
+                "En Yüksek Puan", "Ortalama Puan",
+                "VWAP", "VWAP Kırılım", "VWAP Bar Önce", "VWAP Puan",
+                "ATH'den Düşüş %", "Yataylık",
+                "Üçgen", "Üçgen Sıkışma %", "Üçgen Puan",
+                "Düşen Kırılım", "Trend Temas", "Trend Puan",
+                "Alternasyon", "Alternasyon Desen Puanı", "Alternasyon Puan",
+                "RSI 14", "Dirence Alan %", "Hacim Oranı", "Retest", "Güçlü Teyitler",
+            ]
+            detail_df = pd.DataFrame([{k: r.get(k, "—") for k in detail_cols} for r in filtered])
+            st.dataframe(detail_df, width="stretch", hide_index=True, height=min(720, 82 + 36 * max(1, len(detail_df))))
+            st.download_button(
+                "CSV İndir",
+                detail_df.to_csv(index=False).encode("utf-8-sig"),
+                file_name="bist_karar_tablosu.csv",
+                mime="text/csv",
+                width="stretch",
+            )
         return
 
     if view == "Özet":
@@ -1112,24 +951,32 @@ def render_results_page():
             }
             for _, name, r in overview_items
         ])
-        render_compact_table(overview_df, {"Yükseliş Puanı": "Puan"}, note="Özet görünüm — en yüksek puanlı adayların kısa listesi.", key_prefix="overview")
-        option_map = {}
-        for _, name, r in overview_items:
-            sym = str(r.get("symbol", "—"))
-            signals = collect_signal_results_for_symbol(sets, sym)
-            label = f"{sym} · {name} · puan {round(q_score(r),1)}"
-            option_map[label] = (sym, name, r, signals)
-        c1, c2 = st.columns([5, 1])
-        with c1:
-            selected_label = st.selectbox("Grafik aç", list(option_map.keys()), key="overview_picker")
-        with c2:
-            st.write("")
-            if st.button("Grafiği Aç", type="primary", key="overview_open_chart", width="stretch"):
-                sym, name, r, signals = option_map[selected_label]
-                if len(signals) >= 2:
-                    open_chart("combined", sym, build_combined_chart_payload(sym, signals))
-                else:
-                    open_chart(chart_kind_for(name), sym, r)
+        table_nonce = int(st.session_state.get("_result_table_nonce", 0))
+        overview_event = st.dataframe(
+            overview_df,
+            width="stretch",
+            hide_index=True,
+            height=min(620, 80 + 35 * len(overview_df)),
+            on_select="rerun",
+            selection_mode="single-row",
+            key=f"result_table_overview_{table_nonce}",
+        )
+        selected_rows = []
+        try:
+            selected_rows = list(overview_event.selection.rows)
+        except Exception:
+            try:
+                selected_rows = list((overview_event or {}).get("selection", {}).get("rows", []))
+            except Exception:
+                selected_rows = []
+        if selected_rows:
+            row_idx = int(selected_rows[0])
+            if 0 <= row_idx < len(overview_items):
+                _, name, selected = overview_items[row_idx]
+                sym = str(selected.get("symbol", "—"))
+                st.session_state["_result_table_nonce"] = table_nonce + 1
+                st.session_state["_results_focus"] = "Özet"
+                open_chart(chart_kind_for(name), sym, selected)
         return
 
     items = list(sets.get(view) or [])
@@ -1160,16 +1007,17 @@ def render_results_page():
                 "Anchor": r.get("anchor_reason") or "—",
                 "Anchor Tarihi": r.get("anchor_date") or "—",
             } for r in sorted(items, key=lambda z: float(z.get("drawdown_pct") or 0), reverse=True)]
-        helper_df = pd.DataFrame(rows)
-        render_compact_table(helper_df, note="Yardımcı filtre sonuçları.", key_prefix=f"helper_{view}")
+        st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=min(680, 80 + 35 * len(rows)))
         st.download_button(
             "⬇️ Sonuçları CSV indir",
-            helper_df.to_csv(index=False).encode("utf-8-sig"),
+            pd.DataFrame(rows).to_csv(index=False).encode("utf-8-sig"),
             file_name=("yataylik_sonuclari.csv" if view == "Yataylık" else "ath_dusus_sonuclari.csv"),
             mime="text/csv", width="stretch",
         )
         return
 
+    # VWAP'ın HAM eşleşmeleri daima korunur. Yataylık / ATH filtresi sadece
+    # sonuç görünümünde isteğe bağlı süzme yapar; tarama sonucunu silmez.
     if view == "VWAP":
         fs = m.get("filters") or {}
         filters_active = bool(fs.get("sideways_enabled") or fs.get("drawdown_enabled"))
@@ -1224,47 +1072,59 @@ def render_results_page():
         else:
             st.info("VWAP ek filtresi kapalı. Yataylık ve ATH’den düşüş sonucu eleme yapmıyor.")
 
-    f1, f2, f3 = st.columns(3)
+    f1, f2 = st.columns(2)
     with f1:
         min_quality_label = st.selectbox("En düşük kalite", ["Tümü", "60+", "70+", "80+"], index=0, key=f"quality_{view}")
     with f2:
         search = st.text_input("Hisse ara", placeholder="Örn: THYAO", key=f"search_{view}")
-    sort_options = {
-        "VWAP": ["Yükseliş Puanı ↓", "VWAP Seviyesi ↓", "Bar Önce ↑", "ATH / Anchor Düşüş ↓", "Sembol A-Z"],
-        "Üçgen": ["Yükseliş Puanı ↓", "Sıkışma % ↑", "Sembol A-Z"],
-        "Düşen Trend": ["Yükseliş Puanı ↓", "Temas ↓", "Bar Önce ↑", "Sembol A-Z"],
-        "Alternasyon": ["Yükseliş Puanı ↓", "Desen Puanı ↓", "Zincir ↓", "Sembol A-Z"],
-    }
-    with f3:
-        sort_mode = st.selectbox("Sırala", sort_options.get(view, ["Yükseliş Puanı ↓", "Sembol A-Z"]), index=0, key=f"sort_{view}")
     min_score = {"Tümü": 0, "60+": 60, "70+": 70, "80+": 80}[min_quality_label]
     filtered = [r for r in items if q_score(r) >= min_score]
     if search.strip():
         needle = search.strip().upper()
         filtered = [r for r in filtered if needle in str(r.get("symbol", "")).upper()]
-    filtered = sort_view_rows(view, filtered, sort_mode)
+    filtered.sort(key=q_score, reverse=True)
 
     if not filtered:
         st.warning("Bu filtreye uyan sonuç yok.")
         return
 
     st.markdown("### Tablo görünümü")
+    st.caption("📈 Grafiği açmak için tablodaki hisse satırına bir kez tıkla veya telefonda dokun.")
     df = pd.DataFrame(result_rows(view, filtered))
-    short_headers = {
-        "Yükseliş Puanı": "Puan", "Alternasyon Desen Puanı": "Alt Desen", "Gövde Örtüşme %": "Örtüşme %",
-        "Bar Önce": "Bar", "Son Kapanış": "Kapanış", "ATH'den Düşüş %": "Düşüş %"
-    }
-    render_compact_table(df, short_headers, note="Tüm sonuç alanları yatay kaydırma olmadan görünür.", key_prefix=f"table_{view}")
 
-    option_map = {chart_choice_label_from_result(r, view): r for r in filtered}
-    c1, c2 = st.columns([5, 1])
-    with c1:
-        selected_label = st.selectbox("Grafik açılacak hisse", list(option_map.keys()), key=f"chart_picker_{view}")
-    with c2:
-        st.write("")
-        if st.button("Grafiği Aç", type="primary", key=f"open_chart_{view}", width="stretch"):
-            selected = option_map[selected_label]
+    # Streamlit'in yerleşik satır seçimini kullanıyoruz. Böylece ayrı bir
+    # "hisse seç / grafiği aç" alanına ihtiyaç kalmaz: tablonun kendisi
+    # grafik navigasyonudur. Nonce, grafikten geri dönüldüğünde eski seçimin
+    # yeniden tetiklenmesini önler.
+    table_nonce = int(st.session_state.get("_result_table_nonce", 0))
+    table_event = st.dataframe(
+        df,
+        width="stretch",
+        hide_index=True,
+        height=min(620, 80 + 35 * len(df)),
+        on_select="rerun",
+        selection_mode="single-row",
+        key=f"result_table_{view}_{table_nonce}",
+    )
+
+    selected_rows = []
+    try:
+        selected_rows = list(table_event.selection.rows)
+    except Exception:
+        try:
+            selected_rows = list((table_event or {}).get("selection", {}).get("rows", []))
+        except Exception:
+            selected_rows = []
+
+    if selected_rows:
+        row_idx = int(selected_rows[0])
+        if 0 <= row_idx < len(filtered):
+            selected = filtered[row_idx]
             sym = str(selected.get("symbol", "—"))
+            # Bir sonraki sonuç ekranında tablo yeni anahtarla oluşturulsun;
+            # böylece geri dönünce aynı satır otomatik tekrar açılmaz.
+            st.session_state["_result_table_nonce"] = table_nonce + 1
+            st.session_state["_results_focus"] = view
             open_chart(chart_kind_for(view), sym, selected)
 
     st.download_button(
@@ -1283,7 +1143,6 @@ def render_results_page():
 
 # -----------------------------------------------------------------------------
 # Tarama çalıştırıcıları
-
 # -----------------------------------------------------------------------------
 def make_progress_callback(progress, label, start=0.0, span=1.0):
     def cb(done, total, sym):
