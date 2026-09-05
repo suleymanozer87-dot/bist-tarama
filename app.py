@@ -129,6 +129,57 @@ div[role="radiogroup"] label:has(input:checked) {
     .hero, .nav-shell, .scan-card, .result-card, [data-testid="stMetric"], [data-testid="stExpander"] { border-radius:18px !important; }
     .stButton > button, .stDownloadButton > button { width:100% !important; min-height:2.95rem !important; }
 }
+
+
+/* V5.9 compact decision cards */
+.result-stat-strip { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.45rem; margin:.35rem 0 .75rem 0; }
+.result-stat { background:#fff; border:1px solid #e5e7eb; border-radius:15px; padding:.55rem .7rem; }
+.result-stat .k { color:#6b7280; font-size:.68rem; font-weight:700; }
+.result-stat .v { color:#111827; font-size:1.08rem; font-weight:800; margin-top:.08rem; }
+.decision-list { display:flex; flex-direction:column; gap:.45rem; margin-top:.45rem; }
+a.decision-card { display:block; text-decoration:none !important; color:inherit !important; background:#fff; border:1px solid #e5e7eb; border-radius:17px; padding:.62rem .72rem; box-shadow:0 3px 12px rgba(17,24,39,.035); transition:transform .08s ease,border-color .08s ease,box-shadow .08s ease; }
+a.decision-card:hover { border-color:#0a84ff; box-shadow:0 5px 16px rgba(10,132,255,.08); transform:translateY(-1px); }
+.dc-top { display:grid; grid-template-columns:92px 64px minmax(150px,1.2fr) minmax(120px,.8fr); align-items:center; gap:.45rem; }
+.dc-symbol { font-size:1rem; font-weight:850; color:#111827; letter-spacing:.01em; }
+.dc-score { display:inline-flex; align-items:center; justify-content:center; background:#eef6ff; color:#0068d9; border:1px solid #cfe5ff; border-radius:999px; min-height:28px; font-size:.82rem; font-weight:850; }
+.dc-signals { font-size:.78rem; font-weight:750; color:#374151; white-space:normal; }
+.dc-strong { font-size:.72rem; color:#6b7280; text-align:right; }
+.dc-metrics { display:grid; grid-template-columns:repeat(10,minmax(0,1fr)); gap:.32rem; margin-top:.48rem; }
+.dc-metric { background:#f8fafc; border-radius:10px; padding:.33rem .38rem; min-width:0; }
+.dc-metric .mk { display:block; color:#94a3b8; font-size:.56rem; font-weight:800; text-transform:uppercase; letter-spacing:.03em; }
+.dc-metric .mv { display:block; color:#111827; font-size:.70rem; font-weight:720; margin-top:.06rem; white-space:normal; overflow-wrap:anywhere; }
+.dc-note { color:#64748b; font-size:.64rem; margin-top:.35rem; white-space:normal; }
+.signal-tag { display:inline-block; margin-right:.18rem; margin-bottom:.14rem; padding:.12rem .34rem; border-radius:999px; background:#f3f4f6; border:1px solid #e5e7eb; color:#374151; font-size:.62rem; font-weight:800; }
+.simple-result-card { display:block; text-decoration:none !important; color:inherit !important; background:#fff; border:1px solid #e5e7eb; border-radius:15px; padding:.56rem .65rem; margin:.38rem 0; }
+.simple-result-card:hover { border-color:#0a84ff; }
+.src-top { display:flex; align-items:center; gap:.45rem; flex-wrap:wrap; }
+.src-symbol { font-size:.95rem; font-weight:850; min-width:70px; }
+.src-score { color:#0068d9; font-weight:850; }
+.src-body { display:flex; flex-wrap:wrap; gap:.28rem; margin-top:.34rem; }
+.src-chip { background:#f8fafc; border-radius:9px; padding:.25rem .38rem; font-size:.68rem; color:#334155; }
+
+@media (max-width: 760px) {
+  .result-stat-strip { grid-template-columns:repeat(4,minmax(0,1fr)); gap:.25rem; }
+  .result-stat { padding:.4rem .38rem; border-radius:12px; text-align:center; }
+  .result-stat .k { font-size:.54rem; }
+  .result-stat .v { font-size:.9rem; }
+  a.decision-card { padding:.55rem .55rem; border-radius:15px; }
+  .dc-top { grid-template-columns:72px 52px 1fr; gap:.3rem; }
+  .dc-strong { grid-column:1 / -1; text-align:left; font-size:.62rem; margin-top:-.1rem; }
+  .dc-symbol { font-size:.9rem; }
+  .dc-score { min-height:25px; font-size:.73rem; }
+  .dc-signals { font-size:.67rem; }
+  .dc-metrics { grid-template-columns:repeat(5,minmax(0,1fr)); gap:.24rem; margin-top:.38rem; }
+  .dc-metric { padding:.28rem .25rem; border-radius:8px; }
+  .dc-metric .mk { font-size:.48rem; }
+  .dc-metric .mv { font-size:.60rem; }
+  .dc-note { font-size:.56rem; }
+}
+@media (max-width: 430px) {
+  .dc-metrics { grid-template-columns:repeat(4,minmax(0,1fr)); }
+  .result-stat-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+
 </style>
 """,
     unsafe_allow_html=True,
@@ -367,6 +418,103 @@ def render_compact_table(df, header_map=None, note=None, key_prefix="table", lin
     table_html = '<div class="compact-result-wrap">' + note_html + '<table class="compact-result-table"><thead><tr>' + thead + '</tr></thead><tbody>' + ''.join(body_rows) + '</tbody></table></div>'
     st.markdown(table_html, unsafe_allow_html=True)
 
+
+
+def _esc(v):
+    return html.escape(_fmt_cell(v))
+
+
+def render_result_stats(combined_rows):
+    total = len(combined_rows or [])
+    s2 = sum(int(r.get("Sinyal Sayısı") or 0) >= 2 for r in (combined_rows or []))
+    p70 = sum(float(r.get("En Yüksek Puan") or 0) >= 70 for r in (combined_rows or []))
+    s3 = sum(int(r.get("Sinyal Sayısı") or 0) >= 3 for r in (combined_rows or []))
+    st.markdown(
+        f'<div class="result-stat-strip">'
+        f'<div class="result-stat"><div class="k">HİSSE</div><div class="v">{total}</div></div>'
+        f'<div class="result-stat"><div class="k">2+ SİNYAL</div><div class="v">{s2}</div></div>'
+        f'<div class="result-stat"><div class="k">70+ PUAN</div><div class="v">{p70}</div></div>'
+        f'<div class="result-stat"><div class="k">3+ SİNYAL</div><div class="v">{s3}</div></div>'
+        f'</div>', unsafe_allow_html=True
+    )
+
+
+def _signal_tags(row):
+    text = str(row.get("Teyitler") or "—")
+    if text == "—":
+        return '<span class="signal-tag">—</span>'
+    parts = [x.strip() for x in text.split("+") if x.strip()]
+    short = {"Düşen Trend": "TREND", "Alternasyon": "ALT", "Üçgen": "ÜÇG", "VWAP": "VWAP"}
+    return ''.join(f'<span class="signal-tag">{html.escape(short.get(p,p))}</span>' for p in parts)
+
+
+def _metric_html(label, value):
+    return f'<div class="dc-metric"><span class="mk">{html.escape(str(label))}</span><span class="mv">{_esc(value)}</span></div>'
+
+
+def render_decision_cards(rows):
+    if not rows:
+        st.warning("Bu filtrelere uyan hisse yok.")
+        return
+    cards = []
+    for r in rows:
+        sym = str(r.get("Sembol") or "—").replace(".IS", "")
+        href = f'?open={html.escape(sym)}'
+        score = _fmt_cell(r.get("En Yüksek Puan"))
+        avg = _fmt_cell(r.get("Ortalama Puan"))
+        strong = _esc(r.get("En Güçlü Sinyal"))
+        signal_count = int(r.get("Sinyal Sayısı") or 0)
+        alt = r.get("Alternasyon") or "—"
+        alt_score = r.get("Alternasyon Desen Puanı")
+        if alt_score not in (None, "—", ""):
+            alt = f"{alt} / {alt_score}"
+        metrics = ''.join([
+            _metric_html("VWAP", r.get("VWAP", "—")),
+            _metric_html("Düşüş", (str(r.get("ATH'den Düşüş %", "—")) + "%") if r.get("ATH'den Düşüş %") not in (None,"—","") else "—"),
+            _metric_html("Yatay", r.get("Yataylık", "—")),
+            _metric_html("Üçgen", r.get("Üçgen", "—")),
+            _metric_html("Trend", r.get("Düşen Kırılım", "—")),
+            _metric_html("Alt", alt),
+            _metric_html("RSI", r.get("RSI 14", "—")),
+            _metric_html("Hacim", r.get("Hacim Oranı", "—")),
+            _metric_html("Direnç", (str(r.get("Dirence Alan %", "—")) + "%") if r.get("Dirence Alan %") not in (None,"—","") else "—"),
+            _metric_html("Retest", r.get("Retest", "—")),
+        ])
+        note = r.get("Güçlü Teyitler")
+        note_html = f'<div class="dc-note">{html.escape(str(note))}</div>' if note not in (None,"—","") else ''
+        cards.append(
+            f'<a class="decision-card" href="{href}" target="_self">'
+            f'<div class="dc-top">'
+            f'<div class="dc-symbol">{html.escape(sym)}</div>'
+            f'<div class="dc-score">{html.escape(score)}</div>'
+            f'<div class="dc-signals">{_signal_tags(r)}</div>'
+            f'<div class="dc-strong">{signal_count} sinyal · güçlü {strong} · ort {html.escape(avg)}</div>'
+            f'</div><div class="dc-metrics">{metrics}</div>{note_html}</a>'
+        )
+    st.markdown('<div class="decision-list">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
+
+
+def render_simple_signal_cards(view, rows):
+    if not rows:
+        st.warning("Bu filtreye uyan sonuç yok.")
+        return
+    cards = []
+    for r in rows:
+        sym = str((r or {}).get("symbol") or "—").replace(".IS", "")
+        href = f'?open={html.escape(sym)}'
+        score = round(q_score(r), 1)
+        chips = []
+        if view == "VWAP":
+            chips = [f"{r.get('level','—')}. VWAP", f"Bar {r.get('bars_ago','—')}", f"Düşüş {format_drawdown_value(r)}%", format_sideways_status(r)]
+        elif view == "Üçgen":
+            chips = [r.get("pattern_type","—"), f"Sıkışma {r.get('squeeze_pct','—')}%", f"Apex {r.get('apex_bars_ahead','—')}"]
+        elif view == "Düşen Trend":
+            chips = [f"Temas {r.get('touches','—')}", f"Bar {r.get('bars_ago','—')}", r.get("cross_date","—")]
+        elif view == "Alternasyon":
+            chips = [f"Zincir {r.get('chain_length','—')}", f"Desen {r.get('score','—')}", f"Örtüşme {r.get('mean_body_overlap_pct','—')}%"]
+        body = ''.join(f'<span class="src-chip">{html.escape(_fmt_cell(x))}</span>' for x in chips)
+        cards.append(f'<a class="simple-result-card" href="{href}" target="_self"><div class="src-top"><span class="src-symbol">{html.escape(sym)}</span><span class="src-score">{score}</span><span class="small-muted">{html.escape(q_grade(r))}</span></div><div class="src-body">{body}</div></a>')
+    st.markdown(''.join(cards), unsafe_allow_html=True)
 
 def sort_combined_rows(rows, mode):
     rows = list(rows or [])
@@ -1015,15 +1163,10 @@ def render_results_page():
                 set_page("Tarama")
         return
 
-    cols = st.columns(4)
-    for col, name in zip(cols, names):
-        rows = list(sets.get(name) or [])
-        col.metric(name, len(rows), delta=f"{sum(q_score(r) >= 70 for r in rows)} adet 70+")
-
     focus = st.session_state.get("_results_focus", "Karar Tablosu")
     choices = ["Karar Tablosu", "Özet"] + names + ["Yataylık", "ATH'den Düşüş"]
     index = choices.index(focus) if focus in choices else 0
-    view = st.radio("Bölüm", choices, index=index, key="results_view_select", horizontal=True, label_visibility="collapsed")
+    view = st.radio("Bölüm", choices, index=index, key="results_view_select", horizontal=True, label_visibility="collapsed", format_func=lambda x: {"Karar Tablosu":"Karar", "Düşen Trend":"Trend", "Alternasyon":"Alt", "ATH'den Düşüş":"Düşüş"}.get(x, x))
     st.session_state["_results_focus"] = view
 
     if view == "Karar Tablosu":
@@ -1032,20 +1175,18 @@ def render_results_page():
             st.warning("Birleştirilecek sonuç bulunamadı.")
             return
 
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Hisse", len(combined_rows))
-        m2.metric("2+ Sinyal", sum(int(r.get("Sinyal Sayısı") or 0) >= 2 for r in combined_rows))
-        m3.metric("70+ Puan", sum(float(r.get("En Yüksek Puan") or 0) >= 70 for r in combined_rows))
-        m4.metric("3+ Sinyal", sum(int(r.get("Sinyal Sayısı") or 0) >= 3 for r in combined_rows))
+        render_result_stats(combined_rows)
 
-        f1, f2, f3, f4 = st.columns(4)
+        f1, f2, f3, f4, f5 = st.columns([1.25, .8, .8, 1.25, 1.15])
         with f1:
-            query = st.text_input("Hisse ara", placeholder="THYAO", key="decision_symbol_search")
+            query = st.text_input("Hisse", placeholder="THYAO", key="decision_symbol_search")
         with f2:
-            min_signal = st.selectbox("En az sinyal", [1, 2, 3, 4], index=0, key="decision_min_signal")
+            min_signal = st.selectbox("Min. sinyal", [1, 2, 3, 4], index=0, key="decision_min_signal")
         with f3:
-            min_score = st.selectbox("En az puan", [0, 50, 60, 70, 80], index=0, key="decision_min_score")
+            min_score = st.selectbox("Min. puan", [0, 50, 60, 70, 80], index=0, key="decision_min_score")
         with f4:
+            required_signals = st.multiselect("Sinyal", ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"], default=[], key="decision_required_signals", placeholder="Tümü")
+        with f5:
             sort_mode = st.selectbox("Sırala", ["Sinyal Sayısı ↓", "En Yüksek Puan ↓", "Ortalama Puan ↓", "RSI 14 ↓", "Hacim Oranı ↓", "ATH / Anchor Düşüş ↓", "Sembol A-Z"], index=0, key="decision_sort_mode")
 
         filtered = []
@@ -1057,51 +1198,17 @@ def render_results_page():
                 continue
             if float(row.get("En Yüksek Puan") or 0) < float(min_score):
                 continue
+            if required_signals:
+                row_signals = set((row.get("_signal_results") or {}).keys())
+                if not all(sig in row_signals for sig in required_signals):
+                    continue
             filtered.append(row)
         filtered = sort_combined_rows(filtered, sort_mode)
 
-        rows = []
-        for r in filtered:
-            vwap_txt = str(r.get("VWAP") or "—")
-            if r.get("VWAP Kırılım") not in (None, "—", ""):
-                vwap_txt += f" · {r.get('VWAP Kırılım')}"
-            if r.get("VWAP Bar Önce") not in (None, "—", ""):
-                vwap_txt += f" · {r.get('VWAP Bar Önce')} bar"
-
-            yd = f"Düşüş {r.get('ATH\'den Düşüş %', '—')}% · {r.get('Yataylık', '—')}"
-            formasyon = f"Üçgen {r.get('Üçgen', '—')} · Trend {r.get('Düşen Kırılım', '—')}"
-            alt = str(r.get("Alternasyon") or "—")
-            alt_score = r.get("Alternasyon Desen Puanı")
-            if alt_score not in (None, "—", ""):
-                alt += f" · desen {alt_score}"
-            formasyon += f" · Alt {alt}"
-
-            momentum = f"RSI {r.get('RSI 14', '—')} · Hacim {r.get('Hacim Oranı', '—')} · Direnç {r.get('Dirence Alan %', '—')}% · RT {r.get('Retest', '—')}"
-            teyit = f"{r.get('Kalite', '—')} · {r.get('Güçlü Teyitler', '—')}"
-            rows.append({
-                "Sembol": r.get("Sembol", "—"),
-                "Sinyaller": f"{r.get('Sinyal Sayısı', 0)} · {r.get('Teyitler', '—')}",
-                "Puan": f"Max {r.get('En Yüksek Puan', '—')} · Ort {r.get('Ortalama Puan', '—')}",
-                "VWAP": vwap_txt,
-                "Yatay / Düşüş": yd,
-                "Formasyonlar": formasyon,
-                "Momentum / Risk": momentum,
-                "Teyit": teyit,
-            })
-        decision_df = pd.DataFrame(rows)
-        render_compact_table(
-            decision_df,
-            note="Satırın herhangi bir yerine tıkla: o hissenin grafiği açılır. Aynı hissede birden fazla sinyal varsa grafik sayfasında hepsi gösterilir.",
-            key_prefix="decision_main",
-            link_symbol_col="Sembol",
-        )
-        st.download_button(
-            "CSV İndir",
-            pd.DataFrame(filtered).drop(columns=[c for c in pd.DataFrame(filtered).columns if str(c).startswith("_")], errors="ignore").to_csv(index=False).encode("utf-8-sig"),
-            file_name="bist_karar_tablosu.csv",
-            mime="text/csv",
-            width="stretch",
-        )
+        render_decision_cards(filtered)
+        with st.expander("CSV", expanded=False):
+            export_df = pd.DataFrame(filtered).drop(columns=[c for c in pd.DataFrame(filtered).columns if str(c).startswith("_")], errors="ignore")
+            st.download_button("CSV İndir", export_df.to_csv(index=False).encode("utf-8-sig"), file_name="bist_karar_tablosu.csv", mime="text/csv", width="stretch")
         return
 
     if view == "Özet":
@@ -1124,7 +1231,8 @@ def render_results_page():
             }
             for _, name, r in overview_items
         ])
-        render_compact_table(overview_df, note="Satıra tıkla ve grafiği aç.", key_prefix="overview", link_symbol_col="Sembol")
+        overview_results = [r for _, _, r in overview_items]
+        render_simple_signal_cards("Özet", overview_results)
         return
 
     items = list(sets.get(view) or [])
@@ -1153,8 +1261,16 @@ def render_results_page():
                 "Tarih": r.get("anchor_date") or "—",
             } for r in sorted(items, key=lambda z: float(z.get("drawdown_pct") or 0), reverse=True)]
         helper_df = pd.DataFrame(rows)
-        render_compact_table(helper_df, note="Yardımcı filtre sonuçları.", key_prefix=f"helper_{view}")
-        st.download_button("⬇️ Sonuçları CSV indir", helper_df.to_csv(index=False).encode("utf-8-sig"), file_name=("yataylik_sonuclari.csv" if view == "Yataylık" else "ath_dusus_sonuclari.csv"), mime="text/csv", width="stretch")
+        helper_cards = []
+        for row in rows:
+            sym = str(row.get("Sembol") or "—").replace(".IS", "")
+            signals = collect_signal_results_for_symbol(sets, sym)
+            href = f'?open={html.escape(sym)}' if signals else '#'
+            chips = ''.join(f'<span class="src-chip">{html.escape(str(k))}: {html.escape(_fmt_cell(v))}</span>' for k, v in row.items() if k != "Sembol")
+            helper_cards.append(f'<a class="simple-result-card" href="{href}" target="_self"><div class="src-top"><span class="src-symbol">{html.escape(sym)}</span></div><div class="src-body">{chips}</div></a>')
+        st.markdown(''.join(helper_cards), unsafe_allow_html=True)
+        with st.expander("CSV", expanded=False):
+            st.download_button("CSV İndir", helper_df.to_csv(index=False).encode("utf-8-sig"), file_name=("yataylik_sonuclari.csv" if view == "Yataylık" else "ath_dusus_sonuclari.csv"), mime="text/csv", width="stretch")
         return
 
     if view == "VWAP":
@@ -1172,7 +1288,7 @@ def render_results_page():
             selected_level = int(level_choice.split(".", 1)[0])
             items = [r for r in items if int(r.get("level") or 0) == selected_level]
 
-    st.caption(f"Periyot: **{m.get('period') or '—'}** · Taranan: **{m.get('total') or '—'}** · Tarama: **{m.get('scan_time') or '—'}** · Veri hatası: **{len(errors)}**")
+    st.caption(f"{m.get('period') or '—'} · {m.get('total') or '—'} hisse · {len(errors)} hata")
 
     f1, f2, f3 = st.columns(3)
     with f1:
@@ -1197,54 +1313,10 @@ def render_results_page():
         st.warning("Bu filtreye uyan sonuç yok.")
         return
 
-    rows = []
-    if view == "VWAP":
-        for r in filtered:
-            rows.append({
-                "Sembol": str(r.get("symbol", "—")).replace(".IS", ""),
-                "Puan": round(q_score(r), 1),
-                "VWAP": f"{r.get('level', '—')}. VWAP",
-                "Kırılım": f"{r.get('cross_date', '—')} · {r.get('bars_ago', '—')} bar",
-                "Fiyat": f"K {r.get('last_close', '—')} · V {r.get('last_vwap', '—')}",
-                "Yatay / Düşüş": f"{format_sideways_status(r)} · %{format_drawdown_value(r)}",
-                "Filtre": "✅" if bool(r.get("filter_pass", True)) else "❌",
-            })
-    elif view == "Üçgen":
-        for r in filtered:
-            rows.append({
-                "Sembol": str(r.get("symbol", "—")).replace(".IS", ""),
-                "Puan": round(q_score(r), 1),
-                "Desen": r.get("pattern_type", "—"),
-                "Sıkışma": f"%{r.get('squeeze_pct', '—')}",
-                "Apex": r.get("apex_bars_ahead", "—"),
-                "Kapanış": r.get("last_close", "—"),
-                "Teyit": q_reasons(r),
-            })
-    elif view == "Düşen Trend":
-        for r in filtered:
-            rows.append({
-                "Sembol": str(r.get("symbol", "—")).replace(".IS", ""),
-                "Puan": round(q_score(r), 1),
-                "Temas": r.get("touches", "—"),
-                "Kırılım": f"{r.get('cross_date', '—')} · {r.get('bars_ago', '—')} bar",
-                "Kapanış": r.get("last_close", "—"),
-                "Teyit": q_reasons(r),
-            })
-    else:
-        for r in filtered:
-            rows.append({
-                "Sembol": str(r.get("symbol", "—")).replace(".IS", ""),
-                "Puan": round(q_score(r), 1),
-                "Zincir": r.get("chain_length", "—"),
-                "Desen": r.get("score", "—"),
-                "Örtüşme": r.get("mean_body_overlap_pct", "—"),
-                "Süreklilik": r.get("continuity_score", "—"),
-                "Tarih": f"{r.get('start_date', '—')} → {r.get('end_date', '—')}",
-                "Teyit": q_reasons(r),
-            })
-    df = pd.DataFrame(rows)
-    render_compact_table(df, note="Satırın herhangi bir yerine tıkla: grafik hemen açılır.", key_prefix=f"table_{view}", link_symbol_col="Sembol")
-    st.download_button("⬇️ Sonuçları CSV indir", df.to_csv(index=False).encode("utf-8-sig"), file_name=f"{view.lower().replace(' ', '_')}_sonuclar.csv", mime="text/csv", width="stretch")
+    render_simple_signal_cards(view, filtered)
+    df = pd.DataFrame(result_rows(view, filtered))
+    with st.expander("CSV", expanded=False):
+        st.download_button("CSV İndir", df.to_csv(index=False).encode("utf-8-sig"), file_name=f"{view.lower().replace(' ', '_')}_sonuclar.csv", mime="text/csv", width="stretch")
     if errors:
         with st.expander(f"Veri hataları ({len(errors)})"):
             for item in errors[:50]:

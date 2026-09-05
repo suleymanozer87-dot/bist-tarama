@@ -1,0 +1,14 @@
+[theme]
+base = "light"
+primaryColor = "#0F766E"
+backgroundColor = "#F6F8FB"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#172033"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# Mobil tarayıcı kısa süreli bağlantıyı kesse bile oturumu hemen temizleme.
+disconnectedSessionTTL = 3600
+websocketPingInterval = 30
