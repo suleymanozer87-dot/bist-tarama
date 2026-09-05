@@ -1,0 +1,15 @@
+{
+  "enabled": true,
+  "timezone": "Europe/Istanbul",
+  "weekdays": [0, 1, 2, 3, 4],
+  "times": ["10:05", "10:30", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "17:45"],
+  "grace_minutes": 9,
+  "scan_mode": "Tümünü Tara",
+  "min_score": 70,
+  "min_signal_count": 1,
+  "priority_signal_count": 2,
+  "max_messages_per_run": 20,
+  "send_summary_when_empty": false,
+  "dedupe_days": 14,
+  "app_url": ""
+}
