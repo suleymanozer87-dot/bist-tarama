@@ -456,52 +456,57 @@ def render_decision_cards(rows):
     if not rows:
         st.warning("Bu filtrelere uyan hisse yok.")
         return
-    cards = []
-    for r in rows:
+    for idx, r in enumerate(rows):
         sym = str(r.get("Sembol") or "—").replace(".IS", "")
-        href = f'?open={html.escape(sym)}'
         score = _fmt_cell(r.get("En Yüksek Puan"))
         avg = _fmt_cell(r.get("Ortalama Puan"))
-        strong = _esc(r.get("En Güçlü Sinyal"))
+        strong = _fmt_cell(r.get("En Güçlü Sinyal"))
         signal_count = int(r.get("Sinyal Sayısı") or 0)
-        alt = r.get("Alternasyon") or "—"
-        alt_score = r.get("Alternasyon Desen Puanı")
-        if alt_score not in (None, "—", ""):
-            alt = f"{alt} / {alt_score}"
-        metrics = ''.join([
-            _metric_html("VWAP", r.get("VWAP", "—")),
-            _metric_html("Düşüş", (str(r.get("ATH'den Düşüş %", "—")) + "%") if r.get("ATH'den Düşüş %") not in (None,"—","") else "—"),
-            _metric_html("Yatay", r.get("Yataylık", "—")),
-            _metric_html("Üçgen", r.get("Üçgen", "—")),
-            _metric_html("Trend", r.get("Düşen Kırılım", "—")),
-            _metric_html("Alt", alt),
-            _metric_html("RSI", r.get("RSI 14", "—")),
-            _metric_html("Hacim", r.get("Hacim Oranı", "—")),
-            _metric_html("Direnç", (str(r.get("Dirence Alan %", "—")) + "%") if r.get("Dirence Alan %") not in (None,"—","") else "—"),
-            _metric_html("Retest", r.get("Retest", "—")),
-        ])
-        note = r.get("Güçlü Teyitler")
-        note_html = f'<div class="dc-note">{html.escape(str(note))}</div>' if note not in (None,"—","") else ''
-        cards.append(
-            f'<a class="decision-card" href="{href}" target="_self">'
-            f'<div class="dc-top">'
-            f'<div class="dc-symbol">{html.escape(sym)}</div>'
-            f'<div class="dc-score">{html.escape(score)}</div>'
-            f'<div class="dc-signals">{_signal_tags(r)}</div>'
-            f'<div class="dc-strong">{signal_count} sinyal · güçlü {strong} · ort {html.escape(avg)}</div>'
-            f'</div><div class="dc-metrics">{metrics}</div>{note_html}</a>'
-        )
-    st.markdown('<div class="decision-list">' + ''.join(cards) + '</div>', unsafe_allow_html=True)
-
+        signals_txt = str(r.get("Teyitler") or "—")
+        with st.container(border=True):
+            if st.button(
+                f"{sym}  ·  {score} puan  ·  {signal_count} sinyal  ·  {signals_txt}",
+                key=f"decision_card_open_{sym}_{idx}",
+                width="stretch",
+                type="secondary",
+            ):
+                if r.get("_chart_kind") == "combined":
+                    open_chart("combined", sym, r.get("_chart_payload"))
+                else:
+                    chart_view = r.get("_chart_view")
+                    result = r.get("_chart_result")
+                    if chart_view and result:
+                        open_chart(chart_kind_for(chart_view), sym, result)
+            alt = r.get("Alternasyon") or "—"
+            alt_score = r.get("Alternasyon Desen Puanı")
+            if alt_score not in (None, "—", ""):
+                alt = f"{alt} / {alt_score}"
+            metrics = ''.join([
+                _metric_html("VWAP", r.get("VWAP", "—")),
+                _metric_html("Düşüş", (str(r.get("ATH'den Düşüş %", "—")) + "%") if r.get("ATH'den Düşüş %") not in (None,"—","") else "—"),
+                _metric_html("Yatay", r.get("Yataylık", "—")),
+                _metric_html("Üçgen", r.get("Üçgen", "—")),
+                _metric_html("Trend", r.get("Düşen Kırılım", "—")),
+                _metric_html("Alt", alt),
+                _metric_html("RSI", r.get("RSI 14", "—")),
+                _metric_html("Hacim", r.get("Hacim Oranı", "—")),
+                _metric_html("Direnç", (str(r.get("Dirence Alan %", "—")) + "%") if r.get("Dirence Alan %") not in (None,"—","") else "—"),
+                _metric_html("Retest", r.get("Retest", "—")),
+            ])
+            note = r.get("Güçlü Teyitler")
+            note_html = f'<div class="dc-note">{html.escape(str(note))}</div>' if note not in (None,"—","") else ''
+            st.markdown(
+                f'<div class="dc-top"><div class="dc-strong">güçlü {html.escape(str(strong))} · ort {html.escape(str(avg))}</div></div>'
+                f'<div class="dc-metrics">{metrics}</div>{note_html}',
+                unsafe_allow_html=True,
+            )
 
 def render_simple_signal_cards(view, rows):
     if not rows:
         st.warning("Bu filtreye uyan sonuç yok.")
         return
-    cards = []
-    for r in rows:
+    for idx, r in enumerate(rows):
         sym = str((r or {}).get("symbol") or "—").replace(".IS", "")
-        href = f'?open={html.escape(sym)}'
         score = round(q_score(r), 1)
         chips = []
         if view == "VWAP":
@@ -512,9 +517,25 @@ def render_simple_signal_cards(view, rows):
             chips = [f"Temas {r.get('touches','—')}", f"Bar {r.get('bars_ago','—')}", r.get("cross_date","—")]
         elif view == "Alternasyon":
             chips = [f"Zincir {r.get('chain_length','—')}", f"Desen {r.get('score','—')}", f"Örtüşme {r.get('mean_body_overlap_pct','—')}%"]
-        body = ''.join(f'<span class="src-chip">{html.escape(_fmt_cell(x))}</span>' for x in chips)
-        cards.append(f'<a class="simple-result-card" href="{href}" target="_self"><div class="src-top"><span class="src-symbol">{html.escape(sym)}</span><span class="src-score">{score}</span><span class="small-muted">{html.escape(q_grade(r))}</span></div><div class="src-body">{body}</div></a>')
-    st.markdown(''.join(cards), unsafe_allow_html=True)
+        elif view == "Özet":
+            chips = [q_reasons(r)]
+        with st.container(border=True):
+            if st.button(
+                f"{sym}  ·  {score} puan  ·  {q_grade(r)}",
+                key=f"signal_card_open_{view}_{sym}_{idx}",
+                width="stretch",
+                type="secondary",
+            ):
+                signals = collect_signal_results_for_symbol(st.session_state._result_sets, sym)
+                if len(signals) >= 2:
+                    open_chart("combined", sym, build_combined_chart_payload(sym, signals))
+                elif view in {"VWAP", "Üçgen", "Düşen Trend", "Alternasyon"}:
+                    open_chart(chart_kind_for(view), sym, r)
+                elif signals:
+                    name, result = next(iter(signals.items()))
+                    open_chart(chart_kind_for(name), sym, result)
+            body = ''.join(f'<span class="src-chip">{html.escape(_fmt_cell(x))}</span>' for x in chips)
+            st.markdown(f'<div class="src-body">{body}</div>', unsafe_allow_html=True)
 
 def sort_combined_rows(rows, mode):
     rows = list(rows or [])
@@ -776,6 +797,29 @@ def handle_open_symbol_query():
     except Exception:
         pass
     st.rerun()
+    return True
+
+
+def restore_latest_results_if_needed():
+    ensure_result_store()
+    if any(st.session_state._result_sets.get(n) is not None for n in ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]):
+        return False
+    try:
+        snap = get_scan_job_manager().latest_snapshot()
+    except Exception:
+        snap = None
+    if not snap:
+        return False
+    result_sets = snap.get("result_sets") or {}
+    if not any(result_sets.get(n) is not None for n in ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]):
+        return False
+    _sync_job_results(snap)
+    st.session_state["_active_job_id"] = snap.get("id")
+    try:
+        if snap.get("id"):
+            st.query_params["job"] = str(snap.get("id"))
+    except Exception:
+        pass
     return True
 
 
@@ -1261,14 +1305,18 @@ def render_results_page():
                 "Tarih": r.get("anchor_date") or "—",
             } for r in sorted(items, key=lambda z: float(z.get("drawdown_pct") or 0), reverse=True)]
         helper_df = pd.DataFrame(rows)
-        helper_cards = []
-        for row in rows:
+        for idx, row in enumerate(rows):
             sym = str(row.get("Sembol") or "—").replace(".IS", "")
             signals = collect_signal_results_for_symbol(sets, sym)
-            href = f'?open={html.escape(sym)}' if signals else '#'
-            chips = ''.join(f'<span class="src-chip">{html.escape(str(k))}: {html.escape(_fmt_cell(v))}</span>' for k, v in row.items() if k != "Sembol")
-            helper_cards.append(f'<a class="simple-result-card" href="{href}" target="_self"><div class="src-top"><span class="src-symbol">{html.escape(sym)}</span></div><div class="src-body">{chips}</div></a>')
-        st.markdown(''.join(helper_cards), unsafe_allow_html=True)
+            with st.container(border=True):
+                if st.button(sym, key=f"helper_open_{view}_{sym}_{idx}", width="stretch", type="secondary", disabled=not bool(signals)):
+                    if len(signals) >= 2:
+                        open_chart("combined", sym, build_combined_chart_payload(sym, signals))
+                    elif signals:
+                        name, result = next(iter(signals.items()))
+                        open_chart(chart_kind_for(name), sym, result)
+                chips = ''.join(f'<span class="src-chip">{html.escape(str(k))}: {html.escape(_fmt_cell(v))}</span>' for k, v in row.items() if k != "Sembol")
+                st.markdown(f'<div class="src-body">{chips}</div>', unsafe_allow_html=True)
         with st.expander("CSV", expanded=False):
             st.download_button("CSV İndir", helper_df.to_csv(index=False).encode("utf-8-sig"), file_name=("yataylik_sonuclari.csv" if view == "Yataylık" else "ath_dusus_sonuclari.csv"), mime="text/csv", width="stretch")
         return
@@ -1715,7 +1763,12 @@ st.session_state.setdefault("_active_job_id", None)
 st.session_state.setdefault("_synced_job_revision", -1)
 ensure_result_store()
 _resolve_job_snapshot(auto_attach_running=True)
-handle_open_symbol_query()
+restore_latest_results_if_needed()
+try:
+    if st.query_params.get("open") is not None:
+        del st.query_params["open"]
+except Exception:
+    pass
 
 if render_chart_page_if_requested():
     st.stop()
