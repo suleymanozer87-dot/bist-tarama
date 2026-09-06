@@ -2,8 +2,8 @@ name: BIST Otomatik Tarama
 
 on:
   schedule:
-    # Türkiye saati 10:00-18:00 aralığında 5 dakikada bir sadece SAAT KONTROLÜ yapar.
-    # Gerçek tarama auto_scan_settings.json / SCAN_TIMES saatlerinde çalışır.
+    # Türkiye saati 10:00-18:00 aralığında 5 dakikada bir yalnız SAAT KONTROLÜ.
+    # Gerçek tarama AUTO_SCAN_CONFIG_JSON içindeki saatlerde çalışır.
     - cron: '*/5 7-15 * * 1-5'
   workflow_dispatch:
 
@@ -22,6 +22,11 @@ jobs:
       - name: Kodu al
         uses: actions/checkout@v4
 
+      - name: Türkiye tarihini hazırla
+        id: trdate
+        shell: bash
+        run: echo "day=$(TZ=Europe/Istanbul date +%F)" >> "$GITHUB_OUTPUT"
+
       - name: Python kur
         uses: actions/setup-python@v5
         with:
@@ -36,6 +41,13 @@ jobs:
           restore-keys: |
             autoscan-state-
 
+      - name: Günlük piyasa veri cache'ini geri yükle
+        id: market-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: veri_onbellek
+          key: market-data-${{ steps.trdate.outputs.day }}
+
       - name: Durum dosyasını hazırla
         shell: bash
         run: |
@@ -47,6 +59,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Otomatik taramayı çalıştır
+        id: scan
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -64,6 +77,13 @@ jobs:
           else
             python auto_scan.py --scheduled
           fi
+
+      - name: Günlük piyasa veri cache'ini kaydet
+        if: steps.scan.outputs.did_scan == 'true' && steps.market-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: veri_onbellek
+          key: market-data-${{ steps.trdate.outputs.day }}
 
       - name: Bildirim durumunu kaydet
         if: always()

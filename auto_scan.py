@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -26,6 +27,18 @@ BIST_LIST = BASE_DIR / "bist_list.txt"
 STATE_PATH = BASE_DIR / ".auto_scan_state.json"
 
 PHASES = ["VWAP", "Üçgen", "Düşen Trend", "Alternasyon"]
+
+
+def _set_github_output(name: str, value: str):
+    path = os.getenv("GITHUB_OUTPUT", "").strip()
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{name}={value}\n")
+    except Exception:
+        pass
+
 
 
 def _read_json(path: Path, default):
@@ -184,11 +197,13 @@ def run_all_scans(symbols, app_cfg: dict, scan_mode: str, phases_cfg=None):
     total = len(symbols)
     for phase in phases:
         phase_errors = []
+        started = time.perf_counter()
         print(f"[{phase}] {total} hisse taranıyor...", flush=True)
         out = _scan_chunk(phase, symbols, app_cfg, None, phase_errors)
         results[phase] = list((out or {}).get("rows") or [])
         errors[phase] = phase_errors
-        print(f"[{phase}] {len(results[phase])} sonuç, {len(phase_errors)} hata", flush=True)
+        elapsed = time.perf_counter() - started
+        print(f"[{phase}] {len(results[phase])} sonuç, {len(phase_errors)} hata · {elapsed:.1f} sn", flush=True)
     return results, errors
 
 
@@ -319,6 +334,7 @@ def main():
         due = find_due_slot(auto_cfg, state, now)
         if not due:
             print(f"Tarama saati değil: {now.strftime('%d.%m.%Y %H:%M %Z')}")
+            _set_github_output("did_scan", "false")
             save_state(state)
             return 0
         slot_key, slot_dt = due
@@ -326,6 +342,7 @@ def main():
     else:
         print("Manuel/force tarama başlatılıyor.")
 
+    _set_github_output("did_scan", "true")
     app_cfg = load_app_settings(auto_cfg)
     symbols = load_symbols(app_cfg)
     if not symbols:

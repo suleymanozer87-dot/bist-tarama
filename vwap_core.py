@@ -76,6 +76,12 @@ INTRADAY_REQUEST_MIN_GAP_SECONDS = 0.18
 _INTRADAY_REQUEST_LOCK = threading.Lock()
 _INTRADAY_LAST_REQUEST_TS = 0.0
 
+# V6.2 — aynı Python süreci içinde aynı veriyi CSV'den tekrar tekrar okumayı engeller.
+# Tarama mantığına dokunmaz; yalnız veri katmanında RAM önbelleği kullanır.
+_MEMORY_CACHE_LOCK = threading.Lock()
+_MEMORY_DAILY_CACHE = {}
+_MEMORY_INTRADAY_CACHE = {}
+
 
 def _effective_scan_workers(period, requested):
     """Gün-içi taramalarda Yahoo'yu aşırı paralel istekten korur."""
@@ -1912,20 +1918,31 @@ def _save_to_cache(symbol, df, period="max"):
 
 
 def fetch_history_cached(symbol, period="max", use_cache=True):
-    """Tam geçmişi (varsayılan `max`) kapsam bilgisiyle ayrı cache dosyasında tutar.
+    """Günlük geçmişi disk + RAM cache ile döndürür.
 
-    Böylece eski 5 yıllık cache yanlışlıkla 'gerçek IPO/ATH geçmişi' diye yeniden
-    kullanılmaz. İlk çalıştırma daha uzun olabilir; sonraki taramalar aynı gün cache'ten gelir.
+    V6.2: Aynı otomatik tarama içinde VWAP/kalite/alternasyon aynı günlük
+    veriyi tekrar istediğinde CSV parse edilmez ve Yahoo'ya ikinci kez gidilmez.
+    Veri/sinyal semantiği değişmez.
     """
+    key = (str(symbol), str(period))
     if use_cache:
+        with _MEMORY_CACHE_LOCK:
+            mem = _MEMORY_DAILY_CACHE.get(key)
+        if mem is not None:
+            return mem.copy(), None
+
         cached = _load_from_cache(symbol, period)
         if cached is not None:
-            return cached, None
+            with _MEMORY_CACHE_LOCK:
+                _MEMORY_DAILY_CACHE[key] = cached
+            return cached.copy(), None
 
     df, error = fetch_history(symbol, period=period)
     if df is not None and use_cache:
         _save_to_cache(symbol, df, period)
-    return df, error
+        with _MEMORY_CACHE_LOCK:
+            _MEMORY_DAILY_CACHE[key] = df
+    return (df.copy() if df is not None else None), error
 
 
 # --- Gün-içi (intraday) veri çekme — "4h" gibi periyotlar için --------
@@ -2079,21 +2096,84 @@ def _save_intraday_to_cache(symbol, yf_interval, yf_period, df):
         pass
 
 
-def fetch_intraday_history_cached(symbol, yf_interval, yf_period, use_cache=True):
-    """Gün-içi veriyi 45 dakikalık akıllı cache ile kullanır.
+def _period_months(period):
+    return {"1mo": 1, "3mo": 3, "6mo": 6, "1y": 12}.get(str(period))
 
-    Aynı taramayı kısa süre içinde tekrar çalıştırmak Yahoo'ya yüzlerce yeni
-    istek göndermediği için hem daha hızlıdır hem de geçici boş veri riskini azaltır.
+
+def _trim_intraday_to_requested_period(df, requested_period):
+    """Daha geniş aynı-interval cache'i istenen Yahoo penceresine yaklaştırır."""
+    months = _period_months(requested_period)
+    if df is None or months is None or len(df) == 0:
+        return df
+    try:
+        last_ts = pd.Timestamp(df.index[-1])
+        cutoff = last_ts - pd.DateOffset(months=months)
+        trimmed = df.loc[pd.DatetimeIndex(df.index) >= cutoff]
+        return trimmed if len(trimmed) else df
+    except Exception:
+        return df
+
+
+def _load_intraday_superset_cache(symbol, yf_interval, yf_period):
+    """Örn. 4s taramasında çekilmiş 60m/1y verisini, sonraki 1s/6mo taramasında tekrar kullanır.
+
+    Yalnız aynı interval ve daha geniş güvenli pencereler kullanılır; 730d fallback
+    belirsiz olduğu için superset adayı yapılmaz. TTL aynen korunur.
     """
+    candidates = {
+        "6mo": ["1y"],
+        "3mo": ["6mo", "1y"],
+        "1mo": ["3mo", "6mo", "1y"],
+    }.get(str(yf_period), [])
+    for candidate in candidates:
+        key = (str(symbol), str(yf_interval), str(candidate))
+        with _MEMORY_CACHE_LOCK:
+            mem = _MEMORY_INTRADAY_CACHE.get(key)
+        if mem is not None:
+            return _trim_intraday_to_requested_period(mem.copy(), yf_period)
+        disk = _load_intraday_from_cache(symbol, yf_interval, candidate)
+        if disk is not None:
+            with _MEMORY_CACHE_LOCK:
+                _MEMORY_INTRADAY_CACHE[key] = disk
+            return _trim_intraday_to_requested_period(disk.copy(), yf_period)
+    return None
+
+
+def fetch_intraday_history_cached(symbol, yf_interval, yf_period, use_cache=True):
+    """Gün-içi veriyi disk + RAM + güvenli superset cache ile kullanır.
+
+    V6.2 hızlandırması:
+    - Aynı süreçte aynı veri tekrar CSV'den okunmaz.
+    - Üçgen 4h için çekilen 60m/1y ham veri, hemen arkasından çalışan
+      Düşen Trend 1h/6mo için yeniden Yahoo'dan indirilmez; son 6 aya kırpılır.
+    - Mevcut 45 dakikalık tazelik kuralı korunur.
+    """
+    key = (str(symbol), str(yf_interval), str(yf_period))
     if use_cache:
+        with _MEMORY_CACHE_LOCK:
+            mem = _MEMORY_INTRADAY_CACHE.get(key)
+        if mem is not None:
+            return mem.copy(), None
+
         cached = _load_intraday_from_cache(symbol, yf_interval, yf_period)
         if cached is not None:
-            return cached, None
+            with _MEMORY_CACHE_LOCK:
+                _MEMORY_INTRADAY_CACHE[key] = cached
+            return cached.copy(), None
+
+        superset = _load_intraday_superset_cache(symbol, yf_interval, yf_period)
+        if superset is not None:
+            with _MEMORY_CACHE_LOCK:
+                _MEMORY_INTRADAY_CACHE[key] = superset
+            return superset.copy(), None
 
     df, error = fetch_intraday_history(symbol, yf_interval, yf_period)
     if df is not None and use_cache:
         _save_intraday_to_cache(symbol, yf_interval, yf_period, df)
-    return df, error
+        with _MEMORY_CACHE_LOCK:
+            _MEMORY_INTRADAY_CACHE[key] = df
+    return (df.copy() if df is not None else None), error
+
 
 def _to_naive_normalized_index(index):
     """Karışık yaz/kış UTC offsetlerini güvenle normalize edip tarihe indirger."""
